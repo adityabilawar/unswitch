@@ -6,12 +6,13 @@ A Chrome extension that locks you into one tab to eliminate distractions. Two mo
 
 ### Tab Lock (Toggle)
 - Click the extension icon and tap **Lock Tab** to lock yourself to the current tab
+- Optionally type a task you need to finish before locking—it appears as a draggable reminder banner on the locked tab (drag to reposition, double‑click to reset to top center)
 - Switching to other tabs shows a black screen and immediately returns you to the locked tab
 - Click **Unlock Tab** to disable
 - Extension badge shows "ON" when locked
 
 ### Pomodoro Focus
-- **Start Pomodoro** to begin a focus cycle:
+- **Start Pomodoro** to begin a focus cycle (optional task reminder works here too):
   - 60 min focus → 5 min break → 60 min focus → 10 min break → 60 min focus → 20 min break → (repeats)
 - During focus phases: tab lock is active (same behavior as regular lock)
 - During break phases: you can browse freely

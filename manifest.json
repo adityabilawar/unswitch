@@ -8,6 +8,14 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/blocker.js"],
+      "css": ["content/blocker.css"],
+      "run_at": "document_start"
+    }
+  ],
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {

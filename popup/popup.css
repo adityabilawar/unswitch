@@ -36,6 +36,54 @@ body {
   white-space: nowrap;
 }
 
+.task-input-wrap {
+  margin-bottom: 12px;
+}
+
+.task-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #e0e0e0;
+  background: #252525;
+  border: 1px solid #404040;
+  border-radius: 8px;
+  font-family: inherit;
+}
+
+.task-input::placeholder {
+  color: #666;
+}
+
+.task-input:focus {
+  outline: none;
+  border-color: #505050;
+}
+
+.task-display {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #252525;
+  border-radius: 8px;
+  border: 1px solid #333;
+}
+
+.task-display-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.task-display-text {
+  font-size: 13px;
+  color: #e0e0e0;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 .lock-toggle {
   width: 100%;
   padding: 14px 20px;

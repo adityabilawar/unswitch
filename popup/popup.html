@@ -11,6 +11,13 @@
     <section class="lock-section">
       <h1 class="app-title">Unswitch</h1>
       <div class="tab-info" id="tabInfo">Loading...</div>
+      <div class="task-input-wrap" id="taskInputWrap">
+        <input type="text" class="task-input" id="taskInput" placeholder="What do you need to finish? (optional)" maxlength="200" />
+      </div>
+      <div class="task-display hidden" id="taskDisplay">
+        <span class="task-display-label">Current task</span>
+        <span class="task-display-text" id="taskDisplayText"></span>
+      </div>
       <button class="lock-toggle" id="lockToggle" type="button">
         <span class="lock-icon" id="lockIcon"></span>
         <span class="lock-label" id="lockLabel">Lock Tab</span>

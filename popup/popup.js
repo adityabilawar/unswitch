@@ -6,6 +6,10 @@ const lockToggle = document.getElementById("lockToggle");
 const lockIcon = document.getElementById("lockIcon");
 const lockLabel = document.getElementById("lockLabel");
 const tabInfo = document.getElementById("tabInfo");
+const taskInput = document.getElementById("taskInput");
+const taskInputWrap = document.getElementById("taskInputWrap");
+const taskDisplay = document.getElementById("taskDisplay");
+const taskDisplayText = document.getElementById("taskDisplayText");
 const pomodoroInactive = document.getElementById("pomodoroInactive");
 const pomodoroActive = document.getElementById("pomodoroActive");
 const startPomodoro = document.getElementById("startPomodoro");
@@ -28,11 +32,30 @@ function formatTime(ms) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function updateLockUI(locked, tabTitle) {
+let _prevInSession = false;
+
+function updateLockUI(locked, tabTitle, taskText, inSession) {
   lockToggle.classList.toggle("locked", locked);
   lockIcon.textContent = locked ? "🔒" : "🔓";
   lockLabel.textContent = locked ? "Unlock Tab" : "Lock Tab";
   tabInfo.textContent = tabTitle ? `Locked to: ${tabTitle}` : "Select a tab to lock";
+
+  if (inSession) {
+    taskInputWrap.classList.add("hidden");
+    if (taskText) {
+      taskDisplay.classList.remove("hidden");
+      taskDisplayText.textContent = taskText;
+    } else {
+      taskDisplay.classList.add("hidden");
+    }
+  } else {
+    taskInputWrap.classList.remove("hidden");
+    taskDisplay.classList.add("hidden");
+    if (_prevInSession) {
+      taskInput.value = "";
+    }
+  }
+  _prevInSession = inSession;
 }
 
 function updatePomodoroUI(data) {
@@ -72,6 +95,7 @@ async function refreshState() {
     const isLocked =
       res.state.mode === "locked" ||
       (res.state.mode === "pomodoro" && res.state.pomodoroState === "focus");
+    const inSession = res.state.mode === "locked" || res.state.mode === "pomodoro";
 
     let tabTitle = "";
     if (res.state.lockedTabId) {
@@ -86,7 +110,7 @@ async function refreshState() {
       tabTitle = tabRes.title || "No tab";
     }
 
-    updateLockUI(isLocked, tabTitle);
+    updateLockUI(isLocked, tabTitle, res.state.taskText || "", inSession);
     updatePomodoroUI(res);
   } catch (e) {
     tabInfo.textContent = "Error loading state";
@@ -94,7 +118,9 @@ async function refreshState() {
 }
 
 lockToggle.addEventListener("click", async () => {
-  const res = await sendMessage("toggleLock");
+  const res = await sendMessage("toggleLock", {
+    taskText: taskInput.value.trim(),
+  });
   if (res.error) {
     tabInfo.textContent = res.error;
     return;
@@ -103,7 +129,9 @@ lockToggle.addEventListener("click", async () => {
 });
 
 startPomodoro.addEventListener("click", async () => {
-  const res = await sendMessage("startPomodoro");
+  const res = await sendMessage("startPomodoro", {
+    taskText: taskInput.value.trim(),
+  });
   if (res.error) {
     tabInfo.textContent = res.error;
     return;
