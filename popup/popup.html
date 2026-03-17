@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unswitch</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <section class="lock-section">
+      <h1 class="app-title">Unswitch</h1>
+      <div class="tab-info" id="tabInfo">Loading...</div>
+      <button class="lock-toggle" id="lockToggle" type="button">
+        <span class="lock-icon" id="lockIcon"></span>
+        <span class="lock-label" id="lockLabel">Lock Tab</span>
+      </button>
+    </section>
+
+    <div class="divider"></div>
+
+    <section class="pomodoro-section">
+      <h2 class="section-title">Pomodoro Focus</h2>
+      <div class="pomodoro-inactive" id="pomodoroInactive">
+        <p class="pomodoro-desc">60 min focus → 5/10/20 min breaks</p>
+        <button class="btn-primary" id="startPomodoro" type="button">Start Pomodoro</button>
+      </div>
+      <div class="pomodoro-active hidden" id="pomodoroActive">
+        <div class="timer-display">
+          <div class="countdown" id="countdown">60:00</div>
+          <div class="phase-label" id="phaseLabel">Focus</div>
+          <div class="break-info" id="breakInfo"></div>
+        </div>
+        <button class="lifeline-btn" id="lifelineBtn" type="button">
+          <span class="lifeline-label">Lifeline</span>
+          <span class="lifeline-hint" id="lifelineHint">Hold 5 sec to cancel</span>
+        </button>
+      </div>
+    </section>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
