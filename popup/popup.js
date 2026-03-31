@@ -18,6 +18,7 @@ const phaseLabel = document.getElementById("phaseLabel");
 const breakInfo = document.getElementById("breakInfo");
 const lifelineBtn = document.getElementById("lifelineBtn");
 const lifelineHint = document.getElementById("lifelineHint");
+const leaveDomainWarning = document.getElementById("leaveDomainWarning");
 
 const LIFELINE_HOLD_MS = 5000;
 
@@ -87,10 +88,17 @@ function updatePomodoroUI(data) {
   }
 }
 
+const LEAVE_DOMAIN_STORAGE = "leaveDomainWarning";
+
 async function refreshState() {
   try {
     const res = await sendMessage("getState");
     if (res.error) return;
+
+    const stored = await chrome.storage.local.get(LEAVE_DOMAIN_STORAGE);
+    if (leaveDomainWarning) {
+      leaveDomainWarning.checked = Boolean(stored[LEAVE_DOMAIN_STORAGE]);
+    }
 
     const isLocked =
       res.state.mode === "locked" ||
@@ -193,6 +201,14 @@ lifelineBtn.addEventListener("touchend", (e) => {
 });
 
 lifelineBtn.addEventListener("touchcancel", cancelLifelineHold);
+
+if (leaveDomainWarning) {
+  leaveDomainWarning.addEventListener("change", async () => {
+    await chrome.storage.local.set({
+      [LEAVE_DOMAIN_STORAGE]: leaveDomainWarning.checked,
+    });
+  });
+}
 
 refreshState();
 const timerInterval = setInterval(refreshState, 1000);
