@@ -102,6 +102,9 @@ async function refreshState() {
       try {
         const tab = await chrome.tabs.get(res.state.lockedTabId);
         tabTitle = tab.title || "Untitled";
+        const extra =
+          res.state.lockedTabIds?.length > 1 ? res.state.lockedTabIds.length - 1 : 0;
+        if (extra > 0) tabTitle += ` (+${extra} more)`;
       } catch (_) {
         tabTitle = "Tab closed";
       }

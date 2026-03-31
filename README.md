@@ -8,6 +8,7 @@ A Chrome extension that locks you into one tab to eliminate distractions. Two mo
 - Click the extension icon and tap **Lock Tab** to lock yourself to the current tab
 - Optionally type a task you need to finish before locking—it appears as a draggable reminder banner on the locked tab (drag to reposition, double‑click to reset to top center)
 - Switching to other tabs shows a black screen and immediately returns you to the locked tab
+- Open a link in a new tab from any tab in the locked group (e.g. docs with cross-links)—that tab is added to the group so you can read it; closing it returns you to the primary locked tab
 - Click **Unlock Tab** to disable
 - Extension badge shows "ON" when locked
 
