@@ -16,6 +16,8 @@ const STORAGE_KEY = "unswitch-state";
 const DEFAULT_STATE = {
   mode: "off",
   lockedTabId: null,
+  /** All tab IDs allowed while locked (includes primary + tabs opened from any allowed tab). */
+  lockedTabIds: null,
   lockedWindowId: null,
   taskText: "",
   pomodoroPhase: 0,
@@ -29,7 +31,19 @@ let state = { ...DEFAULT_STATE };
 async function loadState() {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   state = { ...DEFAULT_STATE, ...result[STORAGE_KEY] };
+  if (state.lockedTabId && (!state.lockedTabIds || state.lockedTabIds.length === 0)) {
+    state.lockedTabIds = [state.lockedTabId];
+  }
   return state;
+}
+
+function getLockedTabIdsArray() {
+  if (state.lockedTabIds?.length) return state.lockedTabIds;
+  return state.lockedTabId ? [state.lockedTabId] : [];
+}
+
+function getLockedTabIdSet() {
+  return new Set(getLockedTabIdsArray());
 }
 
 async function saveState() {
@@ -44,7 +58,7 @@ function isTabLockActive() {
 }
 
 function shouldBlockTab(tabId) {
-  return Boolean(isTabLockActive() && tabId && tabId !== state.lockedTabId);
+  return Boolean(isTabLockActive() && tabId && !getLockedTabIdSet().has(tabId));
 }
 
 async function ensureBlockerInjected(tabId) {
@@ -158,6 +172,7 @@ async function disableLock() {
   const tabIdToClean = state.lockedTabId;
   state.mode = "off";
   state.lockedTabId = null;
+  state.lockedTabIds = null;
   state.lockedWindowId = null;
   state.taskText = "";
   await saveState();
@@ -170,7 +185,7 @@ async function disableLock() {
 
 async function handleTabActivated(activeInfo) {
   if (!isTabLockActive()) return;
-  if (activeInfo.tabId === state.lockedTabId) return;
+  if (getLockedTabIdSet().has(activeInfo.tabId)) return;
 
   await showOverlayAndSwitchBack(activeInfo.tabId);
 }
@@ -181,9 +196,29 @@ async function handleTabUpdated(tabId, changeInfo) {
 }
 
 async function handleTabRemoved(tabId) {
+  await loadState();
+  if (!isTabLockActive()) return;
+  const ids = getLockedTabIdsArray();
+  if (!ids.includes(tabId)) return;
   if (tabId === state.lockedTabId) {
     await disableLock();
+    return;
   }
+  state.lockedTabIds = ids.filter((id) => id !== tabId);
+  await saveState();
+  await syncBlockStateForAllTabs();
+}
+
+async function handleTabCreated(tab) {
+  await loadState();
+  if (!isTabLockActive()) return;
+  if (!tab.openerTabId) return;
+  const ids = getLockedTabIdsArray();
+  if (!ids.includes(tab.openerTabId)) return;
+  if (ids.includes(tab.id)) return;
+  state.lockedTabIds = [...ids, tab.id];
+  await saveState();
+  await syncBlockStateForTab(tab.id);
 }
 
 async function handleWindowFocusChanged(windowId) {
@@ -195,7 +230,7 @@ async function handleWindowFocusChanged(windowId) {
     windowId,
   });
 
-  if (activeTab && activeTab.id !== state.lockedTabId) {
+  if (activeTab && !getLockedTabIdSet().has(activeTab.id)) {
     await showOverlayAndSwitchBack(activeTab.id);
   }
 }
@@ -230,6 +265,7 @@ async function handleAlarm(alarm) {
 }
 
 chrome.tabs.onActivated.addListener(handleTabActivated);
+chrome.tabs.onCreated.addListener(handleTabCreated);
 chrome.tabs.onRemoved.addListener(handleTabRemoved);
 chrome.tabs.onUpdated.addListener(handleTabUpdated);
 chrome.windows.onFocusChanged.addListener(handleWindowFocusChanged);
@@ -262,6 +298,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         state.mode = "locked";
         state.lockedTabId = tab.id;
+        state.lockedTabIds = [tab.id];
         state.lockedWindowId = tab.windowId;
         state.taskText = (message.taskText || "").trim();
         await saveState();
@@ -280,6 +317,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         state.mode = "pomodoro";
         state.lockedTabId = tab.id;
+        state.lockedTabIds = [tab.id];
         state.lockedWindowId = tab.windowId;
         state.taskText = (message.taskText || "").trim();
         state.pomodoroPhase = 0;
