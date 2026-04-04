@@ -273,13 +273,6 @@ chrome.alarms.onAlarm.addListener(handleAlarm);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7428/ingest/93aa0858-e5be-4cba-ab5a-dc46a5635cef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3ddcc0'},body:JSON.stringify({sessionId:'3ddcc0',location:'background.js:onMessage',message:'msg received',data:{action:message.action,sender:_sender?.tab?.id||'popup'},timestamp:Date.now(),hypothesisId:'H4',runId:'initial'})}).catch(()=>{});
-    if (message.action === 'debugLog') {
-      await fetch('http://127.0.0.1:7428/ingest/93aa0858-e5be-4cba-ab5a-dc46a5635cef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3ddcc0'},body:JSON.stringify(message)}).catch(()=>{});
-      return {ok:true};
-    }
-    // #endregion
     await loadState();
 
     switch (message.action) {
@@ -437,7 +430,4 @@ chrome.runtime.onInstalled.addListener(async () => {
   await loadState();
   updateIcon();
   await syncBlockStateForAllTabs();
-  // #region agent log
-  fetch('http://127.0.0.1:7428/ingest/93aa0858-e5be-4cba-ab5a-dc46a5635cef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3ddcc0'},body:JSON.stringify({sessionId:'3ddcc0',location:'background.js:onInstalled',message:'extension installed/reloaded',data:{},timestamp:Date.now(),hypothesisId:'H4',runId:'initial'})}).catch(()=>{});
-  // #endregion
 });
