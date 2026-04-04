@@ -1,12 +1,11 @@
 /**
  * Warn before navigating away from the current site (hostname / subdomain tree).
  * e.g. on docs.langchain.com, clicking a link to google.com shows a confirm dialog.
+ * Always active — no opt-in required.
  */
 (function () {
   if (window.__unswitchLeaveDomainInit) return;
   window.__unswitchLeaveDomainInit = true;
-
-  const STORAGE_KEY = "leaveDomainWarning";
 
   let pageHostname = "";
   let clickHandler = null;
@@ -64,28 +63,5 @@
     document.addEventListener("auxclick", clickHandler, true);
   }
 
-  function detach() {
-    if (!clickHandler) return;
-    document.removeEventListener("click", clickHandler, true);
-    document.removeEventListener("auxclick", clickHandler, true);
-    clickHandler = null;
-  }
-
-  async function syncFromStorage() {
-    const data = await chrome.storage.local.get(STORAGE_KEY);
-    if (data[STORAGE_KEY]) {
-      attach();
-    } else {
-      detach();
-    }
-  }
-
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !Object.prototype.hasOwnProperty.call(changes, STORAGE_KEY)) {
-      return;
-    }
-    syncFromStorage();
-  });
-
-  syncFromStorage();
+  attach();
 })();

@@ -60,6 +60,14 @@ body {
   border-color: #505050;
 }
 
+.task-input.error {
+  border-color: #e53935;
+}
+
+.task-input.error::placeholder {
+  color: #e53935;
+}
+
 .task-display {
   margin-bottom: 12px;
   padding: 10px 12px;
@@ -258,6 +266,171 @@ body {
 .lifeline-hint {
   font-size: 10px;
   opacity: 0.8;
+}
+
+.tab-manager {
+  margin-top: 12px;
+}
+
+.tab-manager-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: 1px solid #333;
+  border-radius: 8px;
+  color: #999;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab-manager-toggle:hover {
+  color: #ccc;
+  border-color: #444;
+}
+
+.tab-manager-arrow {
+  transition: transform 0.2s;
+  font-size: 11px;
+}
+
+.tab-manager-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.tab-manager-body {
+  margin-top: 8px;
+}
+
+.locked-tab-list,
+.available-tab-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.locked-tab-item,
+.available-tab-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #ccc;
+  transition: background 0.15s;
+}
+
+.locked-tab-item:hover,
+.available-tab-item:hover {
+  background: #252525;
+}
+
+.tab-favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.tab-favicon-placeholder {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  background: #444;
+}
+
+.tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tab-primary-badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #e53935;
+  background: rgba(229, 57, 53, 0.12);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.tab-remove-btn {
+  background: transparent;
+  border: none;
+  color: #666;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.tab-remove-btn:hover {
+  color: #e53935;
+}
+
+.add-tab-btn {
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: #1565c0;
+  background: transparent;
+  border: 1px dashed #1565c0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+
+.add-tab-btn:hover {
+  background: rgba(21, 101, 192, 0.08);
+}
+
+.add-tab-btn.active {
+  border-style: solid;
+  background: rgba(21, 101, 192, 0.08);
+}
+
+.add-tab-picker {
+  margin-top: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #222;
+}
+
+.add-tab-picker::-webkit-scrollbar {
+  width: 4px;
+}
+
+.add-tab-picker::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 2px;
+}
+
+.available-tab-item {
+  cursor: pointer;
+}
+
+.available-tab-list-empty {
+  padding: 10px;
+  font-size: 11px;
+  color: #666;
+  text-align: center;
 }
 
 .hidden {

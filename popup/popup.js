@@ -16,9 +16,16 @@ const startPomodoro = document.getElementById("startPomodoro");
 const countdown = document.getElementById("countdown");
 const phaseLabel = document.getElementById("phaseLabel");
 const breakInfo = document.getElementById("breakInfo");
+const tabManager = document.getElementById("tabManager");
+const tabManagerToggle = document.getElementById("tabManagerToggle");
+const tabManagerArrow = document.getElementById("tabManagerArrow");
+const tabManagerBody = document.getElementById("tabManagerBody");
+const lockedTabList = document.getElementById("lockedTabList");
+const addTabBtn = document.getElementById("addTabBtn");
+const addTabPicker = document.getElementById("addTabPicker");
+const availableTabList = document.getElementById("availableTabList");
 const lifelineBtn = document.getElementById("lifelineBtn");
 const lifelineHint = document.getElementById("lifelineHint");
-const leaveDomainWarning = document.getElementById("leaveDomainWarning");
 
 const LIFELINE_HOLD_MS = 5000;
 
@@ -57,6 +64,104 @@ function updateLockUI(locked, tabTitle, taskText, inSession) {
     }
   }
   _prevInSession = inSession;
+
+  if (inSession) {
+    tabManager.classList.remove("hidden");
+  } else {
+    tabManager.classList.add("hidden");
+    tabManagerBody.classList.add("hidden");
+    tabManagerArrow.classList.remove("expanded");
+    addTabPicker.classList.add("hidden");
+    addTabBtn.classList.remove("active");
+  }
+}
+
+function createFaviconEl(favIconUrl) {
+  if (favIconUrl) {
+    const img = document.createElement("img");
+    img.className = "tab-favicon";
+    img.src = favIconUrl;
+    img.alt = "";
+    img.onerror = () => {
+      const placeholder = document.createElement("span");
+      placeholder.className = "tab-favicon-placeholder";
+      img.replaceWith(placeholder);
+    };
+    return img;
+  }
+  const placeholder = document.createElement("span");
+  placeholder.className = "tab-favicon-placeholder";
+  return placeholder;
+}
+
+async function renderLockedTabs() {
+  const res = await sendMessage("getLockedTabs");
+  if (!res || !res.tabs) return;
+  lockedTabList.innerHTML = "";
+  for (const tab of res.tabs) {
+    const li = document.createElement("li");
+    li.className = "locked-tab-item";
+
+    li.appendChild(createFaviconEl(tab.favIconUrl));
+
+    const title = document.createElement("span");
+    title.className = "tab-title";
+    title.textContent = tab.title;
+    li.appendChild(title);
+
+    if (tab.isPrimary) {
+      const badge = document.createElement("span");
+      badge.className = "tab-primary-badge";
+      badge.textContent = "primary";
+      li.appendChild(badge);
+    } else {
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "tab-remove-btn";
+      removeBtn.textContent = "✕";
+      removeBtn.title = "Remove from locked tabs";
+      removeBtn.addEventListener("click", async () => {
+        await sendMessage("removeTabFromLock", { tabId: tab.id });
+        await renderLockedTabs();
+        await refreshState();
+      });
+      li.appendChild(removeBtn);
+    }
+
+    lockedTabList.appendChild(li);
+  }
+}
+
+async function renderAvailableTabs() {
+  const res = await sendMessage("getAllTabs");
+  availableTabList.innerHTML = "";
+  if (!res || !res.tabs || res.tabs.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "available-tab-list-empty";
+    empty.textContent = "No other tabs available";
+    availableTabList.appendChild(empty);
+    return;
+  }
+  for (const tab of res.tabs) {
+    const li = document.createElement("li");
+    li.className = "available-tab-item";
+
+    li.appendChild(createFaviconEl(tab.favIconUrl));
+
+    const title = document.createElement("span");
+    title.className = "tab-title";
+    title.textContent = tab.title;
+    li.appendChild(title);
+
+    li.addEventListener("click", async () => {
+      await sendMessage("addTabToLock", { tabId: tab.id });
+      addTabPicker.classList.add("hidden");
+      addTabBtn.classList.remove("active");
+      await renderLockedTabs();
+      await refreshState();
+    });
+
+    availableTabList.appendChild(li);
+  }
 }
 
 function updatePomodoroUI(data) {
@@ -88,17 +193,10 @@ function updatePomodoroUI(data) {
   }
 }
 
-const LEAVE_DOMAIN_STORAGE = "leaveDomainWarning";
-
 async function refreshState() {
   try {
     const res = await sendMessage("getState");
     if (res.error) return;
-
-    const stored = await chrome.storage.local.get(LEAVE_DOMAIN_STORAGE);
-    if (leaveDomainWarning) {
-      leaveDomainWarning.checked = Boolean(stored[LEAVE_DOMAIN_STORAGE]);
-    }
 
     const isLocked =
       res.state.mode === "locked" ||
@@ -123,15 +221,24 @@ async function refreshState() {
 
     updateLockUI(isLocked, tabTitle, res.state.taskText || "", inSession);
     updatePomodoroUI(res);
+    if (inSession && !tabManagerBody.classList.contains("hidden")) {
+      await renderLockedTabs();
+    }
   } catch (e) {
     tabInfo.textContent = "Error loading state";
   }
 }
 
 lockToggle.addEventListener("click", async () => {
-  const res = await sendMessage("toggleLock", {
-    taskText: taskInput.value.trim(),
-  });
+  const task = taskInput.value.trim();
+  if (!task && !_prevInSession) {
+    taskInput.classList.add("error");
+    taskInput.focus();
+    taskInput.placeholder = "Please enter a task first";
+    return;
+  }
+  taskInput.classList.remove("error");
+  const res = await sendMessage("toggleLock", { taskText: task });
   if (res.error) {
     tabInfo.textContent = res.error;
     return;
@@ -140,9 +247,15 @@ lockToggle.addEventListener("click", async () => {
 });
 
 startPomodoro.addEventListener("click", async () => {
-  const res = await sendMessage("startPomodoro", {
-    taskText: taskInput.value.trim(),
-  });
+  const task = taskInput.value.trim();
+  if (!task) {
+    taskInput.classList.add("error");
+    taskInput.focus();
+    taskInput.placeholder = "Please enter a task first";
+    return;
+  }
+  taskInput.classList.remove("error");
+  const res = await sendMessage("startPomodoro", { taskText: task });
   if (res.error) {
     tabInfo.textContent = res.error;
     return;
@@ -202,13 +315,33 @@ lifelineBtn.addEventListener("touchend", (e) => {
 
 lifelineBtn.addEventListener("touchcancel", cancelLifelineHold);
 
-if (leaveDomainWarning) {
-  leaveDomainWarning.addEventListener("change", async () => {
-    await chrome.storage.local.set({
-      [LEAVE_DOMAIN_STORAGE]: leaveDomainWarning.checked,
-    });
-  });
-}
+tabManagerToggle.addEventListener("click", async () => {
+  const isExpanding = tabManagerBody.classList.contains("hidden");
+  tabManagerBody.classList.toggle("hidden");
+  tabManagerArrow.classList.toggle("expanded");
+  if (isExpanding) {
+    await renderLockedTabs();
+  } else {
+    addTabPicker.classList.add("hidden");
+    addTabBtn.classList.remove("active");
+  }
+});
+
+addTabBtn.addEventListener("click", async () => {
+  const isOpening = addTabPicker.classList.contains("hidden");
+  addTabPicker.classList.toggle("hidden");
+  addTabBtn.classList.toggle("active");
+  if (isOpening) {
+    await renderAvailableTabs();
+  }
+});
+
+taskInput.addEventListener("input", () => {
+  if (taskInput.value.trim()) {
+    taskInput.classList.remove("error");
+    taskInput.placeholder = "What do you need to finish?";
+  }
+});
 
 refreshState();
 const timerInterval = setInterval(refreshState, 1000);

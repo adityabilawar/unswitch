@@ -273,6 +273,13 @@ chrome.alarms.onAlarm.addListener(handleAlarm);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7428/ingest/93aa0858-e5be-4cba-ab5a-dc46a5635cef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3ddcc0'},body:JSON.stringify({sessionId:'3ddcc0',location:'background.js:onMessage',message:'msg received',data:{action:message.action,sender:_sender?.tab?.id||'popup'},timestamp:Date.now(),hypothesisId:'H4',runId:'initial'})}).catch(()=>{});
+    if (message.action === 'debugLog') {
+      await fetch('http://127.0.0.1:7428/ingest/93aa0858-e5be-4cba-ab5a-dc46a5635cef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3ddcc0'},body:JSON.stringify(message)}).catch(()=>{});
+      return {ok:true};
+    }
+    // #endregion
     await loadState();
 
     switch (message.action) {
@@ -342,6 +349,65 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return { success: true };
       }
 
+      case "addTabToLock": {
+        if (!isTabLockActive()) return { error: "No active lock session" };
+        const tabId = message.tabId;
+        if (!tabId) return { error: "No tab ID provided" };
+        const ids = getLockedTabIdsArray();
+        if (ids.includes(tabId)) return { error: "Tab already in locked set" };
+        state.lockedTabIds = [...ids, tabId];
+        await saveState();
+        await syncBlockStateForAllTabs();
+        return { success: true };
+      }
+
+      case "removeTabFromLock": {
+        if (!isTabLockActive()) return { error: "No active lock session" };
+        const tabId = message.tabId;
+        if (!tabId) return { error: "No tab ID provided" };
+        if (tabId === state.lockedTabId) return { error: "Cannot remove primary locked tab" };
+        const ids = getLockedTabIdsArray();
+        if (!ids.includes(tabId)) return { error: "Tab not in locked set" };
+        state.lockedTabIds = ids.filter((id) => id !== tabId);
+        await saveState();
+        await syncBlockStateForAllTabs();
+        return { success: true };
+      }
+
+      case "getLockedTabs": {
+        if (!isTabLockActive()) return { tabs: [] };
+        const ids = getLockedTabIdsArray();
+        const tabInfos = [];
+        for (const id of ids) {
+          try {
+            const tab = await chrome.tabs.get(id);
+            tabInfos.push({
+              id: tab.id,
+              title: tab.title || "Untitled",
+              favIconUrl: tab.favIconUrl || "",
+              isPrimary: tab.id === state.lockedTabId,
+            });
+          } catch (_) {
+            // Tab no longer exists
+          }
+        }
+        return { tabs: tabInfos };
+      }
+
+      case "getAllTabs": {
+        const tabs = await chrome.tabs.query({});
+        const lockedSet = getLockedTabIdSet();
+        const available = tabs
+          .filter((t) => !lockedSet.has(t.id))
+          .map((t) => ({
+            id: t.id,
+            title: t.title || "Untitled",
+            favIconUrl: t.favIconUrl || "",
+            windowId: t.windowId,
+          }));
+        return { tabs: available };
+      }
+
       case "getCurrentTab": {
         const [tab] = await chrome.tabs.query({
           active: true,
@@ -371,4 +437,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   await loadState();
   updateIcon();
   await syncBlockStateForAllTabs();
+  // #region agent log
+  fetch('http://127.0.0.1:7428/ingest/93aa0858-e5be-4cba-ab5a-dc46a5635cef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3ddcc0'},body:JSON.stringify({sessionId:'3ddcc0',location:'background.js:onInstalled',message:'extension installed/reloaded',data:{},timestamp:Date.now(),hypothesisId:'H4',runId:'initial'})}).catch(()=>{});
+  // #endregion
 });
