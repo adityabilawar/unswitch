@@ -61,6 +61,10 @@ function shouldBlockTab(tabId) {
   return Boolean(isTabLockActive() && tabId && !getLockedTabIdSet().has(tabId));
 }
 
+function shouldWarnOnLeaveDomain(tabId) {
+  return Boolean(isTabLockActive() && tabId && getLockedTabIdSet().has(tabId));
+}
+
 async function ensureBlockerInjected(tabId) {
   if (!tabId) return;
   try {
@@ -87,6 +91,14 @@ async function syncBlockStateForTab(tabId) {
     });
   } catch (_) {
     // Content script unavailable in this tab
+  }
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      action: "unswitch-set-leave-domain-warning-state",
+      enabled: shouldWarnOnLeaveDomain(tabId),
+    });
+  } catch (_) {
+    // Leave-domain script unavailable in this tab
   }
 }
 
@@ -282,6 +294,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       case "getTabBlockState": {
         const tabId = _sender?.tab?.id;
         return { blocked: shouldBlockTab(tabId) };
+      }
+
+      case "getLeaveDomainWarningState": {
+        const tabId = _sender?.tab?.id;
+        return { enabled: shouldWarnOnLeaveDomain(tabId) };
       }
 
       case "toggleLock": {

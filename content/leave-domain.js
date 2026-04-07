@@ -9,6 +9,7 @@
 
   let pageHostname = "";
   let clickHandler = null;
+  let warningEnabled = false;
 
   function isSameSiteHost(a, b) {
     if (!a || !b) return true;
@@ -39,6 +40,7 @@
   }
 
   function onLinkClickCapture(e) {
+    if (!warningEnabled) return;
     if (e.button !== 0 && e.button !== 1) return;
     const a = findAnchor(e.target);
     if (!a) return;
@@ -63,5 +65,20 @@
     document.addEventListener("auxclick", clickHandler, true);
   }
 
+  function setWarningEnabled(enabled) {
+    warningEnabled = Boolean(enabled);
+  }
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.action === "unswitch-set-leave-domain-warning-state") {
+      setWarningEnabled(message.enabled);
+    }
+  });
+
   attach();
+
+  chrome.runtime.sendMessage({ action: "getLeaveDomainWarningState" }, (response) => {
+    if (chrome.runtime.lastError) return;
+    setWarningEnabled(response?.enabled);
+  });
 })();
