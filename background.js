@@ -28,6 +28,12 @@ const DEFAULT_STATE = {
 
 let state = { ...DEFAULT_STATE };
 
+/** Serialize reminder injection / blocker sync so rapid toggles do not overlap. */
+let deferredWorkChain = Promise.resolve();
+function queueDeferredWork(fn) {
+  deferredWorkChain = deferredWorkChain.then(fn).catch(() => {});
+}
+
 async function loadState() {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   state = { ...DEFAULT_STATE, ...result[STORAGE_KEY] };
@@ -166,22 +172,29 @@ async function removeReminderFromTab(tabId) {
   } catch (_) {}
 }
 
-async function injectReminderIfNeeded() {
-  if (!state.taskText || !state.lockedTabId) return;
+async function injectReminderForTab(tabId) {
+  if (!tabId || !String(state.taskText || "").trim()) return;
+  if (!isTabLockActive() || !getLockedTabIdSet().has(tabId)) return;
   try {
     await chrome.scripting.insertCSS({
-      target: { tabId: state.lockedTabId },
+      target: { tabId },
       files: ["content/reminder.css"],
     });
     await chrome.scripting.executeScript({
-      target: { tabId: state.lockedTabId },
+      target: { tabId },
       files: ["content/reminder.js"],
     });
   } catch (_) {}
 }
 
+async function injectReminderForLockedTabs() {
+  if (!String(state.taskText || "").trim() || !state.lockedTabId) return;
+  const ids = getLockedTabIdsArray();
+  await Promise.all(ids.map((id) => injectReminderForTab(id)));
+}
+
 async function disableLock() {
-  const tabIdToClean = state.lockedTabId;
+  const tabIdsToClean = getLockedTabIdsArray();
   state.mode = "off";
   state.lockedTabId = null;
   state.lockedTabIds = null;
@@ -191,8 +204,12 @@ async function disableLock() {
   updateIcon();
   chrome.alarms.clear(ALARM_FOCUS);
   chrome.alarms.clear(ALARM_BREAK);
-  await removeReminderFromTab(tabIdToClean);
-  await syncBlockStateForAllTabs();
+  queueDeferredWork(async () => {
+    for (const id of tabIdsToClean) {
+      await removeReminderFromTab(id);
+    }
+    await syncBlockStateForAllTabs();
+  });
 }
 
 async function handleTabActivated(activeInfo) {
@@ -205,6 +222,9 @@ async function handleTabActivated(activeInfo) {
 async function handleTabUpdated(tabId, changeInfo) {
   if (changeInfo.status !== "loading" && changeInfo.status !== "complete") return;
   await syncBlockStateForTab(tabId);
+  if (changeInfo.status === "complete") {
+    await injectReminderForTab(tabId);
+  }
 }
 
 async function handleTabRemoved(tabId) {
@@ -231,6 +251,7 @@ async function handleTabCreated(tab) {
   state.lockedTabIds = [...ids, tab.id];
   await saveState();
   await syncBlockStateForTab(tab.id);
+  await injectReminderForTab(tab.id);
 }
 
 async function handleWindowFocusChanged(windowId) {
@@ -271,7 +292,7 @@ async function handleAlarm(alarm) {
     state.pomodoroState = "focus";
     schedulePomodoroAlarm();
     updateIcon();
-    await injectReminderIfNeeded();
+    await injectReminderForLockedTabs();
     await syncBlockStateForAllTabs();
   }
 }
@@ -320,8 +341,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         state.taskText = (message.taskText || "").trim();
         await saveState();
         updateIcon();
-        await injectReminderIfNeeded();
-        await syncBlockStateForAllTabs();
+        queueDeferredWork(async () => {
+          await injectReminderForLockedTabs();
+          await syncBlockStateForAllTabs();
+        });
         return { locked: true, tabId: tab.id, tabTitle: tab.title };
       }
 
@@ -342,8 +365,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         schedulePomodoroAlarm();
         await saveState();
         updateIcon();
-        await injectReminderIfNeeded();
-        await syncBlockStateForAllTabs();
+        queueDeferredWork(async () => {
+          await injectReminderForLockedTabs();
+          await syncBlockStateForAllTabs();
+        });
         return {
           success: true,
           tabId: tab.id,
@@ -368,6 +393,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         state.lockedTabIds = [...ids, tabId];
         await saveState();
         await syncBlockStateForAllTabs();
+        await injectReminderForTab(tabId);
         return { success: true };
       }
 
@@ -380,6 +406,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (!ids.includes(tabId)) return { error: "Tab not in locked set" };
         state.lockedTabIds = ids.filter((id) => id !== tabId);
         await saveState();
+        await removeReminderFromTab(tabId);
         await syncBlockStateForAllTabs();
         return { success: true };
       }

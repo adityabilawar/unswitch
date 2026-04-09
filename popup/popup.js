@@ -249,15 +249,8 @@ lockToggle.addEventListener("click", async () => {
   }
   taskInput.classList.remove("error");
 
-  const stateRes = await sendMessage("getState");
-  if (stateRes?.error) {
-    tabInfo.textContent = stateRes.error;
-    return;
-  }
-  const currentlyLocked =
-    stateRes.state &&
-    (stateRes.state.mode === "locked" ||
-      (stateRes.state.mode === "pomodoro" && stateRes.state.pomodoroState === "focus"));
+  /** Matches refreshState / updateLockUI; avoids an extra getState round-trip per click. */
+  const currentlyLocked = lockToggle.classList.contains("locked");
 
   if (currentlyLocked && !_unlockConfirmPending) {
     _unlockConfirmPending = true;
