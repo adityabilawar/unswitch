@@ -2,7 +2,8 @@
   position: fixed;
   inset: 0;
   z-index: 2147483647;
-  background: #000;
+  background: #050508;
+  background-image: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(30, 30, 45, 0.9), #050508 55%);
   display: none;
   pointer-events: auto;
 }

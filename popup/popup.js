@@ -41,11 +41,21 @@ function formatTime(ms) {
 }
 
 let _prevInSession = false;
+/** First unlock click shows confirmation on the button; second click unlocks. */
+let _unlockConfirmPending = false;
 
 function updateLockUI(locked, tabTitle, taskText, inSession) {
   lockToggle.classList.toggle("locked", locked);
+  lockToggle.classList.toggle("unlock-confirm", locked && _unlockConfirmPending);
   lockIcon.textContent = locked ? "🔒" : "🔓";
-  lockLabel.textContent = locked ? "Unlock Tab" : "Lock Tab";
+  if (!locked) {
+    _unlockConfirmPending = false;
+  }
+  if (locked && _unlockConfirmPending) {
+    lockLabel.textContent = "Are you sure? Tap again";
+  } else {
+    lockLabel.textContent = locked ? "Unlock Tab" : "Lock Tab";
+  }
   tabInfo.textContent = tabTitle ? `Locked to: ${tabTitle}` : "Select a tab to lock";
 
   if (inSession) {
@@ -238,6 +248,29 @@ lockToggle.addEventListener("click", async () => {
     return;
   }
   taskInput.classList.remove("error");
+
+  const stateRes = await sendMessage("getState");
+  if (stateRes?.error) {
+    tabInfo.textContent = stateRes.error;
+    return;
+  }
+  const currentlyLocked =
+    stateRes.state &&
+    (stateRes.state.mode === "locked" ||
+      (stateRes.state.mode === "pomodoro" && stateRes.state.pomodoroState === "focus"));
+
+  if (currentlyLocked && !_unlockConfirmPending) {
+    _unlockConfirmPending = true;
+    lockToggle.classList.add("unlock-confirm");
+    lockLabel.textContent = "Are you sure? Tap again";
+    return;
+  }
+
+  if (currentlyLocked) {
+    _unlockConfirmPending = false;
+    lockToggle.classList.remove("unlock-confirm");
+  }
+
   const res = await sendMessage("toggleLock", { taskText: task });
   if (res.error) {
     tabInfo.textContent = res.error;
