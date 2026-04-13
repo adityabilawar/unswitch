@@ -10,7 +10,7 @@ A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock
 
 - Click the extension icon and choose **Lock Tab** to lock yourself to the current tab.
 - Optionally enter a task before locking. It appears as a draggable reminder on every tab in your allowed set (drag to reposition, double-click to reset to top center).
-- If you switch to another tab, a full-screen blocker appears on that tab and you are returned to your focus tab shortly after. A short “Tab Locked” overlay may flash on the tab you tried to open.
+- If you switch to another tab, Unswitch shows a 10-second guided breathing ritual on that tab, then transitions into the locked screen.
 - Open a link in a new tab from any tab in the locked group (for example documentation with cross-links). That tab is added to the group so you can read it; closing it returns you to the primary locked tab.
 - While locked, **Leave-site warning**: on allowed tabs, clicking a link that would take you to a different hostname shows a confirm dialog so you do not drift off-site by accident (same-site and subdomain navigation is not interrupted).
 - Click **Unlock Tab** to disable the lock.
@@ -57,7 +57,7 @@ unswitch/
   content/
     blocker.js           # Full-screen blocker on tabs outside the allowed set (content script)
     blocker.css
-    overlay.js           # Brief “Tab Locked” overlay (injected when switching to a wrong tab)
+    overlay.js           # 10-second breathing ritual shown before the locked screen
     overlay.css
     leave-domain.js      # Confirm before leaving the current site from an allowed tab while locked
     reminder.js          # Draggable task banner on allowed tabs
@@ -71,7 +71,7 @@ unswitch/
 
 ## Manual testing checklist
 
-- [ ] **Tab lock toggle**: Lock → switch to another tab → see blocker → return to locked tab.
+- [ ] **Tab lock toggle**: Lock → switch to another tab → see 10-second breathing ritual → see locked screen.
 - [ ] **Unlock**: Unlock from popup → switch tabs freely.
 - [ ] **Icon / badge**: Icon reflects lock state; badge shows **ON** when locked.
 - [ ] **Locked tab closed**: Closing the primary locked tab disables the lock.

@@ -132,7 +132,7 @@ function updateIcon() {
   chrome.action.setBadgeBackgroundColor({ color: "#e53935" });
 }
 
-async function showOverlayAndSwitchBack(tabId) {
+async function showBreathingOverlay(tabId) {
   await syncBlockStateForTab(tabId);
   try {
     await chrome.scripting.insertCSS({
@@ -144,19 +144,8 @@ async function showOverlayAndSwitchBack(tabId) {
       files: ["content/overlay.js"],
     });
   } catch (e) {
-    // chrome:// or extension pages - can't inject, just switch back
+    // chrome:// or extension pages - can't inject, blocker remains best effort only
   }
-
-  setTimeout(async () => {
-    try {
-      await chrome.tabs.update(state.lockedTabId, { active: true });
-      const tab = await chrome.tabs.get(state.lockedTabId);
-      await chrome.windows.update(tab.windowId, { focused: true });
-    } catch (e) {
-      // Locked tab may have been closed
-      await disableLock();
-    }
-  }, 300);
 }
 
 async function removeReminderFromTab(tabId) {
@@ -216,7 +205,7 @@ async function handleTabActivated(activeInfo) {
   if (!isTabLockActive()) return;
   if (getLockedTabIdSet().has(activeInfo.tabId)) return;
 
-  await showOverlayAndSwitchBack(activeInfo.tabId);
+  await showBreathingOverlay(activeInfo.tabId);
 }
 
 async function handleTabUpdated(tabId, changeInfo) {
@@ -264,7 +253,7 @@ async function handleWindowFocusChanged(windowId) {
   });
 
   if (activeTab && !getLockedTabIdSet().has(activeTab.id)) {
-    await showOverlayAndSwitchBack(activeTab.id);
+    await showBreathingOverlay(activeTab.id);
   }
 }
 
