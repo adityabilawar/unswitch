@@ -70,6 +70,42 @@ body {
   margin-bottom: 4px;
 }
 
+.preference-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.preference-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.preference-select {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  outline: none;
+}
+
+.preference-select:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.preference-select:focus {
+  border-color: var(--border-focus);
+}
+
 .tab-info {
   font-size: 12px;
   color: var(--text-soft);

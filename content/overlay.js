@@ -1,12 +1,11 @@
 /**
- * Unswitch - Guided breathing ritual shown before the locked tab screen.
+ * Unswitch - Guided breathing ritual on a disallowed tab; when complete, focus returns to the locked tab.
  */
 
 (async function () {
   if (document.getElementById("unswitch-overlay")) return;
 
   const BREATH_DURATION_MS = 10000;
-  const LOCKED_MESSAGE_DELAY_MS = 900;
   const result = await chrome.storage.local.get("unswitch-state");
   const state = result["unswitch-state"] || {};
   const taskText = (state.taskText || "").trim();
@@ -32,18 +31,10 @@
       ${taskText ? `<span class="unswitch-overlay-task">${escapeHtml(taskText)}</span>` : ""}
       <span class="unswitch-overlay-subtext">Stay with the animation for 10 seconds.</span>
     </div>
-    <div class="unswitch-overlay-content unswitch-overlay-locked-screen" hidden>
-      <span class="unswitch-overlay-icon">Locked</span>
-      <span class="unswitch-overlay-text">Tab Locked</span>
-      ${taskText ? `<span class="unswitch-overlay-task">${escapeHtml(taskText)}</span>` : ""}
-      <span class="unswitch-overlay-subtext">Return to your focus tab when you're ready.</span>
-    </div>
   `;
 
   (document.body || document.documentElement)?.appendChild(overlay);
 
-  const ritualScreen = overlay.querySelector(".unswitch-overlay-ritual");
-  const lockedScreen = overlay.querySelector(".unswitch-overlay-locked-screen");
   const phaseEl = overlay.querySelector(".unswitch-overlay-phase");
   const countdownEl = overlay.querySelector(".unswitch-overlay-countdown");
   const timers = [];
@@ -59,7 +50,7 @@
   function teardownOverlay() {
     clearTimers();
     chrome.runtime.onMessage.removeListener(handleMessage);
-    overlay.remove();
+    if (overlay.parentNode) overlay.remove();
   }
 
   function updateBreathUi() {
@@ -101,12 +92,10 @@
 
   timers.push(
     window.setTimeout(() => {
-      overlay.classList.remove("unswitch-overlay-breathe-in", "unswitch-overlay-breathe-out");
-      overlay.classList.add("unswitch-overlay-show-locked");
-      if (ritualScreen) ritualScreen.hidden = true;
-      if (lockedScreen) lockedScreen.hidden = false;
-
-      timers.push(window.setTimeout(teardownOverlay, LOCKED_MESSAGE_DELAY_MS));
+      chrome.runtime.sendMessage({ action: "focusLockedTabAfterBreathing" }, () => {
+        void chrome.runtime.lastError;
+        teardownOverlay();
+      });
     }, BREATH_DURATION_MS)
   );
 })();

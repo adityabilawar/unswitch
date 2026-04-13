@@ -26,8 +26,22 @@ const addTabPicker = document.getElementById("addTabPicker");
 const availableTabList = document.getElementById("availableTabList");
 const lifelineBtn = document.getElementById("lifelineBtn");
 const lifelineHint = document.getElementById("lifelineHint");
+const wrongTabInterstitial = document.getElementById("wrongTabInterstitial");
+
+const UNSWITCH_STATE_KEY = "unswitch-state";
 
 const LIFELINE_HOLD_MS = 5000;
+
+/** Merge preference into storage so it persists even if the service worker is stale. */
+async function persistWrongTabInterstitial(value) {
+  if (value !== "breathing" && value !== "none") return;
+  const stored = await chrome.storage.local.get(UNSWITCH_STATE_KEY);
+  const prev = stored[UNSWITCH_STATE_KEY] || {};
+  await chrome.storage.local.set({
+    [UNSWITCH_STATE_KEY]: { ...prev, wrongTabInterstitial: value },
+  });
+  await sendMessage("getState");
+}
 
 function sendMessage(action, data = {}) {
   return chrome.runtime.sendMessage({ action, ...data });
@@ -206,7 +220,7 @@ function updatePomodoroUI(data) {
 async function refreshState() {
   try {
     const res = await sendMessage("getState");
-    if (res.error) return;
+    if (res.error) return null;
 
     const isLocked =
       res.state.mode === "locked" ||
@@ -230,12 +244,19 @@ async function refreshState() {
     }
 
     updateLockUI(isLocked, tabTitle, res.state.taskText || "", inSession);
+    if (wrongTabInterstitial) {
+      const serverVal = res.state.wrongTabInterstitial;
+      const nextSelect = serverVal === "none" ? "none" : "breathing";
+      wrongTabInterstitial.value = nextSelect;
+    }
     updatePomodoroUI(res);
     if (inSession && !tabManagerBody.classList.contains("hidden")) {
       await renderLockedTabs();
     }
+    return res;
   } catch (e) {
     tabInfo.textContent = "Error loading state";
+    return null;
   }
 }
 
@@ -367,6 +388,21 @@ taskInput.addEventListener("input", () => {
     taskInput.classList.remove("error");
     taskInput.placeholder = "What do you need to finish?";
   }
+});
+
+wrongTabInterstitial?.addEventListener("change", async () => {
+  const chosen = wrongTabInterstitial.value;
+  if (chosen !== "breathing" && chosen !== "none") return;
+
+  await persistWrongTabInterstitial(chosen);
+
+  const res = await sendMessage("setWrongTabInterstitial", { value: chosen });
+
+  if (res?.error && res.error !== "Unknown action") {
+    tabInfo.textContent = res.error;
+  }
+
+  await refreshState();
 });
 
 refreshState();

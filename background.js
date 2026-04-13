@@ -20,6 +20,8 @@ const DEFAULT_STATE = {
   lockedTabIds: null,
   lockedWindowId: null,
   taskText: "",
+  /** "breathing" = 10s inhale/exhale ritual then locked UI; "none" = full-screen tab lock only. */
+  wrongTabInterstitial: "breathing",
   pomodoroPhase: 0,
   pomodoroState: null,
   pomodoroEndTime: null,
@@ -53,7 +55,15 @@ function getLockedTabIdSet() {
 }
 
 async function saveState() {
-  await chrome.storage.local.set({ [STORAGE_KEY]: state });
+  const result = await chrome.storage.local.get(STORAGE_KEY);
+  const disk = result[STORAGE_KEY] || {};
+  const patch = Object.fromEntries(Object.entries(state).filter(([, v]) => v !== undefined));
+  const merged = { ...disk, ...patch };
+  if (merged.lockedTabId && (!merged.lockedTabIds || merged.lockedTabIds.length === 0)) {
+    merged.lockedTabIds = [merged.lockedTabId];
+  }
+  await chrome.storage.local.set({ [STORAGE_KEY]: merged });
+  state = { ...DEFAULT_STATE, ...merged };
 }
 
 function isTabLockActive() {
@@ -132,8 +142,17 @@ function updateIcon() {
   chrome.action.setBadgeBackgroundColor({ color: "#e53935" });
 }
 
-async function showBreathingOverlay(tabId) {
+function useBreathingRitualOnWrongTab() {
+  return (state.wrongTabInterstitial || "breathing") === "breathing";
+}
+
+/** Sync blocker on wrong tab; optionally inject the breathing ritual overlay. */
+async function showWrongTabFeedback(tabId) {
   await syncBlockStateForTab(tabId);
+  if (!useBreathingRitualOnWrongTab()) {
+    scheduleBounceToLockedTab();
+    return;
+  }
   try {
     await chrome.scripting.insertCSS({
       target: { tabId },
@@ -159,6 +178,35 @@ async function removeReminderFromTab(tabId) {
       },
     });
   } catch (_) {}
+}
+
+async function removeBreathingOverlayFromTab(tabId) {
+  if (!tabId) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const el = document.getElementById("unswitch-overlay");
+        if (el) el.remove();
+      },
+    });
+  } catch (_) {}
+}
+
+/** Time to show the full-screen lock UI on a wrong tab before focusing the locked tab again. */
+const TAB_LOCK_ONLY_BOUNCE_MS = 900;
+
+/** After the lock screen is shown on a wrong tab, focus the primary locked tab. */
+function scheduleBounceToLockedTab() {
+  const lockedTabId = state.lockedTabId;
+  const lockedWindowId = state.lockedWindowId;
+  if (!lockedTabId) return;
+  setTimeout(() => {
+    chrome.tabs.update(lockedTabId, { active: true }).catch(() => {});
+    if (lockedWindowId != null) {
+      chrome.windows.update(lockedWindowId, { focused: true }).catch(() => {});
+    }
+  }, TAB_LOCK_ONLY_BOUNCE_MS);
 }
 
 async function injectReminderForTab(tabId) {
@@ -202,10 +250,11 @@ async function disableLock() {
 }
 
 async function handleTabActivated(activeInfo) {
+  await loadState();
   if (!isTabLockActive()) return;
   if (getLockedTabIdSet().has(activeInfo.tabId)) return;
 
-  await showBreathingOverlay(activeInfo.tabId);
+  await showWrongTabFeedback(activeInfo.tabId);
 }
 
 async function handleTabUpdated(tabId, changeInfo) {
@@ -244,6 +293,7 @@ async function handleTabCreated(tab) {
 }
 
 async function handleWindowFocusChanged(windowId) {
+  await loadState();
   if (!isTabLockActive()) return;
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
 
@@ -253,7 +303,7 @@ async function handleWindowFocusChanged(windowId) {
   });
 
   if (activeTab && !getLockedTabIdSet().has(activeTab.id)) {
-    await showBreathingOverlay(activeTab.id);
+    await showWrongTabFeedback(activeTab.id);
   }
 }
 
@@ -309,6 +359,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       case "getLeaveDomainWarningState": {
         const tabId = _sender?.tab?.id;
         return { enabled: shouldWarnOnLeaveDomain(tabId) };
+      }
+
+      case "setWrongTabInterstitial": {
+        const v = message.value;
+        if (v !== "breathing" && v !== "none") {
+          return { error: "Invalid value" };
+        }
+        state.wrongTabInterstitial = v;
+        await saveState();
+        return { success: true };
       }
 
       case "toggleLock": {
@@ -442,6 +502,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return tab
           ? { id: tab.id, title: tab.title || "Untitled" }
           : { error: "No active tab" };
+      }
+
+      case "focusLockedTabAfterBreathing": {
+        const fromTabId = _sender?.tab?.id;
+        if (!isTabLockActive() || !state.lockedTabId) {
+          return { success: false };
+        }
+        try {
+          await chrome.tabs.update(state.lockedTabId, { active: true });
+          if (state.lockedWindowId != null) {
+            await chrome.windows.update(state.lockedWindowId, { focused: true });
+          }
+          if (fromTabId) {
+            await removeBreathingOverlayFromTab(fromTabId);
+            await syncBlockStateForTab(fromTabId);
+          }
+        } catch (_) {
+          return { success: false };
+        }
+        return { success: true };
       }
 
       default:
