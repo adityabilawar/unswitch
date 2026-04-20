@@ -11,7 +11,7 @@ A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock
 - Click the extension icon and choose **Lock Tab** to lock yourself to the current tab.
 - Optionally enter a task before locking. It appears as a draggable reminder on every tab in your allowed set (drag to reposition, double-click to reset to top center).
 - If you switch to another tab, Unswitch blocks that tab. In the popup, under **Blocked tab**, choose **Breathing ritual (10s)** for a guided inhale/exhale animation before the locked screen, or **Tab lock only** to show the locked screen immediately.
-- Open a link in a new tab from any tab in the locked group (for example documentation with cross-links). That tab is added to the group so you can read it; closing it returns you to the primary locked tab.
+- Opening a new tab while locked does not add it to the allowed set. It stays blocked until you explicitly add it from **Manage tabs** in the popup.
 - While locked, **Leave-site warning**: on allowed tabs, clicking a link that would take you to a different hostname shows a confirm dialog so you do not drift off-site by accident (same-site and subdomain navigation is not interrupted).
 - Click **Unlock Tab** to disable the lock.
 - The toolbar icon switches between locked and unlocked artwork; the badge shows **ON** when a focus lock is active.

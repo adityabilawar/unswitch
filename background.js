@@ -16,7 +16,7 @@ const STORAGE_KEY = "unswitch-state";
 const DEFAULT_STATE = {
   mode: "off",
   lockedTabId: null,
-  /** All tab IDs allowed while locked (includes primary + tabs opened from any allowed tab). */
+  /** All tab IDs allowed while locked (primary tab plus any tabs added manually). */
   lockedTabIds: null,
   lockedWindowId: null,
   taskText: "",
@@ -163,7 +163,8 @@ async function showWrongTabFeedback(tabId) {
       files: ["content/overlay.js"],
     });
   } catch (e) {
-    // chrome:// or extension pages - can't inject, blocker remains best effort only
+    // chrome:// or extension pages cannot show the overlay, so fall back to an immediate bounce.
+    scheduleBounceToLockedTab();
   }
 }
 
@@ -282,14 +283,9 @@ async function handleTabRemoved(tabId) {
 async function handleTabCreated(tab) {
   await loadState();
   if (!isTabLockActive()) return;
-  if (!tab.openerTabId) return;
-  const ids = getLockedTabIdsArray();
-  if (!ids.includes(tab.openerTabId)) return;
-  if (ids.includes(tab.id)) return;
-  state.lockedTabIds = [...ids, tab.id];
-  await saveState();
+
+  // New tabs should stay blocked unless the user explicitly adds them via Manage Tabs.
   await syncBlockStateForTab(tab.id);
-  await injectReminderForTab(tab.id);
 }
 
 async function handleWindowFocusChanged(windowId) {
