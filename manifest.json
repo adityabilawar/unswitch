@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Unswitch",
-  "description": "Lock yourself into one tab. Tab lock toggle and pomodoro focus timer with escalating breaks.",
+  "name": "Tab Lock – Focus Mode",
+  "description": "Tab Lock and focus mode: lock to one tab, Pomodoro timer with escalating breaks, breathing ritual, and leave-site guard.",
   "version": "1.1.1",
   "permissions": ["tabs", "activeTab", "scripting", "alarms", "storage"],
   "host_permissions": ["<all_urls>"],

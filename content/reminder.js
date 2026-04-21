@@ -1,5 +1,5 @@
 /**
- * Unswitch - Draggable task reminder banner (injected into locked tab)
+ * Tab Lock – Focus Mode - Draggable task reminder banner (injected into locked tab)
  */
 
 (async function () {

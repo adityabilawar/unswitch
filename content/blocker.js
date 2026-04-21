@@ -27,7 +27,7 @@
           <span class="unswitch-blocker-icon">Locked</span>
           <h1 class="unswitch-blocker-title">Tab Locked</h1>
           <p class="unswitch-blocker-message">
-            Return to your focus tab or unlock Unswitch to keep browsing.
+            Return to your focus tab or unlock Tab Lock to keep browsing.
           </p>
           <p class="unswitch-blocker-task" hidden></p>
         </div>

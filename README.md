@@ -1,8 +1,8 @@
-# Unswitch
+# Tab Lock – Focus Mode
 
 A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock and a Pomodoro-style focus timer with escalating breaks.
 
-**Version:** 1.1.0 (see `manifest.json`)
+**Version:** 1.1.1 (see `manifest.json`)
 
 ## Features
 
@@ -10,7 +10,7 @@ A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock
 
 - Click the extension icon and choose **Lock Tab** to lock yourself to the current tab.
 - Optionally enter a task before locking. It appears as a draggable reminder on every tab in your allowed set (drag to reposition, double-click to reset to top center).
-- If you switch to another tab, Unswitch blocks that tab. In the popup, under **Blocked tab**, choose **Breathing ritual (10s)** for a guided inhale/exhale animation before the locked screen, or **Tab lock only** to show the locked screen immediately.
+- If you switch to another tab, Tab Lock blocks that tab. In the popup, under **Blocked tab**, choose **Breathing ritual (10s)** for a guided inhale/exhale animation before the locked screen, or **Tab lock only** to show the locked screen immediately.
 - Opening a new tab while locked does not add it to the allowed set. It stays blocked until you explicitly add it from **Manage tabs** in the popup.
 - While locked, **Leave-site warning**: on allowed tabs, clicking a link that would take you to a different hostname shows a confirm dialog so you do not drift off-site by accident (same-site and subdomain navigation is not interrupted).
 - Click **Unlock Tab** to disable the lock.
@@ -30,12 +30,12 @@ A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock
 2. Open Chrome and go to `chrome://extensions/`.
 3. Turn on **Developer mode** (toggle in the top-right).
 4. Click **Load unpacked**.
-5. Select the `unswitch` project folder.
+5. Select the `unswitch` project folder (or your local clone path).
 
 ## Usage
 
 1. Go to the tab you want to focus in (document, IDE, study page, and so on).
-2. Click the Unswitch icon in the Chrome toolbar.
+2. Click the Tab Lock icon in the Chrome toolbar.
 3. Choose **Lock Tab** for an immediate lock, or **Start Pomodoro** for structured focus and break periods.
 
 ## Requirements

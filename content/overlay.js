@@ -1,5 +1,5 @@
 /**
- * Unswitch - Guided breathing ritual on a disallowed tab; when complete, focus returns to the locked tab.
+ * Tab Lock – Focus Mode - Guided breathing ritual on a disallowed tab; when complete, focus returns to the locked tab.
  */
 
 (async function () {

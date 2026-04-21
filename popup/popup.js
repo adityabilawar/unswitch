@@ -1,5 +1,5 @@
 /**
- * Unswitch - Popup UI logic
+ * Tab Lock – Focus Mode - Popup UI logic
  */
 
 const lockToggle = document.getElementById("lockToggle");
@@ -28,17 +28,17 @@ const lifelineBtn = document.getElementById("lifelineBtn");
 const lifelineHint = document.getElementById("lifelineHint");
 const wrongTabInterstitial = document.getElementById("wrongTabInterstitial");
 
-const UNSWITCH_STATE_KEY = "unswitch-state";
+const TAB_LOCK_STATE_KEY = "unswitch-state";
 
 const LIFELINE_HOLD_MS = 5000;
 
 /** Merge preference into storage so it persists even if the service worker is stale. */
 async function persistWrongTabInterstitial(value) {
   if (value !== "breathing" && value !== "none") return;
-  const stored = await chrome.storage.local.get(UNSWITCH_STATE_KEY);
-  const prev = stored[UNSWITCH_STATE_KEY] || {};
+  const stored = await chrome.storage.local.get(TAB_LOCK_STATE_KEY);
+  const prev = stored[TAB_LOCK_STATE_KEY] || {};
   await chrome.storage.local.set({
-    [UNSWITCH_STATE_KEY]: { ...prev, wrongTabInterstitial: value },
+    [TAB_LOCK_STATE_KEY]: { ...prev, wrongTabInterstitial: value },
   });
   await sendMessage("getState");
 }

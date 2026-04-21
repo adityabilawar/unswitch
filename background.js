@@ -1,5 +1,5 @@
 /**
- * Unswitch - Tab Lock Chrome Extension
+ * Tab Lock – Focus Mode
  * Background service worker - core tab lock and pomodoro logic
  */
 
@@ -123,7 +123,7 @@ async function syncBlockStateForAllTabs() {
     const tabs = await chrome.tabs.query({});
     await Promise.all(tabs.map((tab) => syncBlockStateForTab(tab.id)));
   } catch (_) {
-    // Ignore sync error
+    // Ignore sync errors
   }
 }
 
