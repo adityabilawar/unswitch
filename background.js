@@ -123,7 +123,7 @@ async function syncBlockStateForAllTabs() {
     const tabs = await chrome.tabs.query({});
     await Promise.all(tabs.map((tab) => syncBlockStateForTab(tab.id)));
   } catch (_) {
-    // Ignore sync errors
+    // Ignore sync error
   }
 }
 
