@@ -2,7 +2,7 @@
 
 A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock and a Pomodoro-style focus timer with escalating breaks.
 
-**Version:** 1.1.1 (see `manifest.json`)
+**Version:** 1.2.2 (see `manifest.json`)
 
 ## Features
 
@@ -10,9 +10,9 @@ A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock
 
 - Click the extension icon and choose **Lock Tab** to lock yourself to the current tab.
 - Optionally enter a task before locking. It appears as a draggable reminder on every tab in your allowed set (drag to reposition, double-click to reset to top center).
-- If you switch to another tab, Tab Lock blocks that tab. In the popup, under **Blocked tab**, choose **Breathing ritual (10s)** for a guided inhale/exhale animation before the locked screen, or **Tab lock only** to show the locked screen immediately.
+- If you switch to another tab, Tab Lock returns you to the focus tab. In the popup, under **Blocked tab**, choose **Breathing ritual (10s)** for a guided inhale/exhale pause, or **Return immediately**.
 - Opening a new tab while locked does not add it to the allowed set. It stays blocked until you explicitly add it from **Manage tabs** in the popup.
-- While locked, **Leave-site warning**: on allowed tabs, clicking a link that would take you to a different hostname shows a confirm dialog so you do not drift off-site by accident (same-site and subdomain navigation is not interrupted).
+- Optional **Leave-site warning**: when enabled, links from an allowed tab to a different hostname ask for confirmation (same-site and subdomain navigation is not interrupted).
 - Click **Unlock Tab** to disable the lock.
 - The toolbar icon switches between locked and unlocked artwork; the badge shows **ON** when a focus lock is active.
 
@@ -41,7 +41,7 @@ A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock
 ## Requirements
 
 - Chrome 88 or later (Manifest V3)
-- **Permissions:** `tabs`, `activeTab`, `scripting`, `alarms`, `storage`
+- **Permissions:** `tabs`, `scripting`, `alarms`, `storage`
 - **Host permissions:** `<all_urls>` (needed to inject the blocker, overlay, and reminder on ordinary web pages)
 
 ## Project structure

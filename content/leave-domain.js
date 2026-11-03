@@ -1,7 +1,7 @@
 /**
  * Warn before navigating away from the current site (hostname / subdomain tree).
  * e.g. on docs.langchain.com, clicking a link to google.com shows a confirm dialog.
- * Always active — no opt-in required.
+ * Enabled only during an active focus session when the user opts in.
  */
 (function () {
   if (window.__unswitchLeaveDomainInit) return;
@@ -71,14 +71,27 @@
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.action === "unswitch-set-leave-domain-warning-state") {
-      setWarningEnabled(message.enabled);
+      refreshWarningState();
     }
+  });
+
+  let requestVersion = 0;
+  function refreshWarningState() {
+    const version = ++requestVersion;
+    chrome.runtime.sendMessage({ action: "getLeaveDomainWarningState" }, (response) => {
+      if (chrome.runtime.lastError || version !== requestVersion) return;
+      setWarningEnabled(response?.enabled);
+    });
+  }
+  chrome.storage.onChanged.addListener((changes, area) => {
+    const next = changes["unswitch-state"]?.newValue;
+    if (area !== "local" || !changes["unswitch-state"]) return;
+    ++requestVersion;
+    setWarningEnabled(false);
+    if (next?.leaveDomainWarning) refreshWarningState();
   });
 
   attach();
 
-  chrome.runtime.sendMessage({ action: "getLeaveDomainWarningState" }, (response) => {
-    if (chrome.runtime.lastError) return;
-    setWarningEnabled(response?.enabled);
-  });
+  refreshWarningState();
 })();

@@ -20,8 +20,10 @@ const DEFAULT_STATE = {
   lockedTabIds: null,
   lockedWindowId: null,
   taskText: "",
-  /** "breathing" = 10s inhale/exhale ritual then locked UI; "none" = full-screen tab lock only. */
-  wrongTabInterstitial: "breathing",
+  /** "breathing" = 10s inhale/exhale ritual; "none" = return immediately. */
+  wrongTabInterstitial: "none",
+  /** Confirm before leaving the current site from an allowed tab. Opt-in to avoid surprise dialogs. */
+  leaveDomainWarning: false,
   pomodoroPhase: 0,
   pomodoroState: null,
   pomodoroEndTime: null,
@@ -29,6 +31,32 @@ const DEFAULT_STATE = {
 };
 
 let state = { ...DEFAULT_STATE };
+
+/** Serialize stateful events. MV3 may deliver tab, alarm, and popup events concurrently. */
+let stateTaskChain = Promise.resolve();
+function runStateTask(task) {
+  const run = stateTaskChain.then(async () => {
+    await loadState();
+    return task();
+  });
+  stateTaskChain = run.catch(() => {});
+  return run;
+}
+
+function runStateEvent(task) {
+  runStateTask(task).catch(() => {});
+}
+
+/**
+ * Load the latest state in the serialized queue, then run browser/UI work outside it.
+ * Content-script messaging can remain pending on restricted or discarded tabs; it must
+ * never prevent popup commands from reaching the state queue.
+ */
+function runFreshStateEffect(effect) {
+  runStateTask(() => undefined)
+    .then(effect)
+    .catch(() => {});
+}
 
 /** Serialize reminder injection / blocker sync so rapid toggles do not overlap. */
 let deferredWorkChain = Promise.resolve();
@@ -73,49 +101,68 @@ function isTabLockActive() {
   );
 }
 
+function isSessionActive() {
+  return state.mode === "locked" || state.mode === "pomodoro";
+}
+
 function shouldBlockTab(tabId) {
   return Boolean(isTabLockActive() && tabId && !getLockedTabIdSet().has(tabId));
 }
 
 function shouldWarnOnLeaveDomain(tabId) {
-  return Boolean(isTabLockActive() && tabId && getLockedTabIdSet().has(tabId));
+  return Boolean(
+    state.leaveDomainWarning &&
+      isTabLockActive() &&
+      tabId &&
+      getLockedTabIdSet().has(tabId)
+  );
 }
 
-async function ensureBlockerInjected(tabId) {
-  if (!tabId) return;
+async function sendTabMessage(tabId, message) {
   try {
-    await chrome.scripting.insertCSS({
-      target: { tabId },
-      files: ["content/blocker.css"],
-    });
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content/blocker.js"],
-    });
+    let timeoutId;
+    await Promise.race([
+      chrome.tabs.sendMessage(tabId, message),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("Tab message timed out")), 1500);
+      }),
+    ]);
+    clearTimeout(timeoutId);
+    return true;
   } catch (_) {
-    // Restricted targets (chrome://, extension pages, etc)
+    return false;
   }
 }
 
 async function syncBlockStateForTab(tabId) {
   if (!tabId) return;
-  await ensureBlockerInjected(tabId);
-  try {
-    await chrome.tabs.sendMessage(tabId, {
-      action: "unswitch-set-block-state",
-      blocked: shouldBlockTab(tabId),
-    });
-  } catch (_) {
-    // Content script unavailable in this tab
+  const blockMessage = {
+    action: "unswitch-set-block-state",
+    blocked: shouldBlockTab(tabId),
+  };
+  const warningMessage = {
+    action: "unswitch-set-leave-domain-warning-state",
+    enabled: shouldWarnOnLeaveDomain(tabId),
+  };
+
+  // Static content scripts handle normal pages. Only inject as a fallback for tabs that
+  // were already open when the extension was installed or updated.
+  if (!(await sendTabMessage(tabId, blockMessage))) {
+    try {
+      await chrome.scripting.insertCSS({
+        target: { tabId },
+        files: ["content/blocker.css"],
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["content/blocker.js", "content/leave-domain.js"],
+      });
+      await sendTabMessage(tabId, blockMessage);
+    } catch (_) {
+      // Restricted targets (chrome://, the Web Store, extension pages, etc.).
+    }
   }
-  try {
-    await chrome.tabs.sendMessage(tabId, {
-      action: "unswitch-set-leave-domain-warning-state",
-      enabled: shouldWarnOnLeaveDomain(tabId),
-    });
-  } catch (_) {
-    // Leave-domain script unavailable in this tab
-  }
+  await sendTabMessage(tabId, warningMessage);
 }
 
 async function syncBlockStateForAllTabs() {
@@ -143,16 +190,20 @@ function updateIcon() {
 }
 
 function useBreathingRitualOnWrongTab() {
-  return (state.wrongTabInterstitial || "breathing") === "breathing";
+  return state.wrongTabInterstitial === "breathing";
 }
 
 /** Sync blocker on wrong tab; optionally inject the breathing ritual overlay. */
 async function showWrongTabFeedback(tabId) {
-  await syncBlockStateForTab(tabId);
   if (!useBreathingRitualOnWrongTab()) {
+    // Returning to work must not wait for a page's content scripts to respond.
     scheduleBounceToLockedTab();
+    queueDeferredWork(() => syncBlockStateForTab(tabId));
     return;
   }
+  await syncBlockStateForTab(tabId);
+  // An unlock may have occurred while the page synchronization was pending.
+  if (!shouldBlockTab(tabId)) return;
   try {
     await chrome.scripting.insertCSS({
       target: { tabId },
@@ -174,6 +225,9 @@ async function removeReminderFromTab(tabId) {
     await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
+        if (typeof window.__unswitchReminderCleanup === "function") {
+          window.__unswitchReminderCleanup();
+        }
         const el = document.getElementById("unswitch-reminder");
         if (el) el.remove();
       },
@@ -187,6 +241,9 @@ async function removeBreathingOverlayFromTab(tabId) {
     await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
+        if (typeof window.__unswitchOverlayCleanup === "function") {
+          window.__unswitchOverlayCleanup();
+        }
         const el = document.getElementById("unswitch-overlay");
         if (el) el.remove();
       },
@@ -194,20 +251,16 @@ async function removeBreathingOverlayFromTab(tabId) {
   } catch (_) {}
 }
 
-/** Time to show the full-screen lock UI on a wrong tab before focusing the locked tab again. */
-const TAB_LOCK_ONLY_BOUNCE_MS = 900;
-
 /** After the lock screen is shown on a wrong tab, focus the primary locked tab. */
 function scheduleBounceToLockedTab() {
   const lockedTabId = state.lockedTabId;
   const lockedWindowId = state.lockedWindowId;
   if (!lockedTabId) return;
-  setTimeout(() => {
-    chrome.tabs.update(lockedTabId, { active: true }).catch(() => {});
-    if (lockedWindowId != null) {
-      chrome.windows.update(lockedWindowId, { focused: true }).catch(() => {});
-    }
-  }, TAB_LOCK_ONLY_BOUNCE_MS);
+  // MV3 workers can be suspended before a timer fires, so perform the redirect now.
+  chrome.tabs.update(lockedTabId, { active: true }).catch(() => {});
+  if (lockedWindowId != null) {
+    chrome.windows.update(lockedWindowId, { focused: true }).catch(() => {});
+  }
 }
 
 async function injectReminderForTab(tabId) {
@@ -238,10 +291,13 @@ async function disableLock() {
   state.lockedTabIds = null;
   state.lockedWindowId = null;
   state.taskText = "";
+  state.pomodoroState = null;
+  state.pomodoroEndTime = null;
+  state.pomodoroBreakDuration = null;
+  state.pomodoroPhase = 0;
   await saveState();
   updateIcon();
-  chrome.alarms.clear(ALARM_FOCUS);
-  chrome.alarms.clear(ALARM_BREAK);
+  await Promise.all([chrome.alarms.clear(ALARM_FOCUS), chrome.alarms.clear(ALARM_BREAK)]);
   queueDeferredWork(async () => {
     for (const id of tabIdsToClean) {
       await removeReminderFromTab(id);
@@ -251,7 +307,6 @@ async function disableLock() {
 }
 
 async function handleTabActivated(activeInfo) {
-  await loadState();
   if (!isTabLockActive()) return;
   if (getLockedTabIdSet().has(activeInfo.tabId)) return;
 
@@ -267,8 +322,7 @@ async function handleTabUpdated(tabId, changeInfo) {
 }
 
 async function handleTabRemoved(tabId) {
-  await loadState();
-  if (!isTabLockActive()) return;
+  if (!isSessionActive()) return;
   const ids = getLockedTabIdsArray();
   if (!ids.includes(tabId)) return;
   if (tabId === state.lockedTabId) {
@@ -281,15 +335,39 @@ async function handleTabRemoved(tabId) {
 }
 
 async function handleTabCreated(tab) {
-  await loadState();
   if (!isTabLockActive()) return;
 
   // New tabs should stay blocked unless the user explicitly adds them via Manage Tabs.
   await syncBlockStateForTab(tab.id);
 }
 
+async function handleTabReplaced(addedTabId, removedTabId) {
+  if (!isSessionActive()) return;
+  const ids = getLockedTabIdsArray();
+  if (!ids.includes(removedTabId)) return;
+
+  state.lockedTabIds = ids.map((id) => (id === removedTabId ? addedTabId : id));
+  if (state.lockedTabId === removedTabId) {
+    state.lockedTabId = addedTabId;
+    try {
+      const tab = await chrome.tabs.get(addedTabId);
+      state.lockedWindowId = tab.windowId;
+    } catch (_) {}
+  }
+  await saveState();
+  queueDeferredWork(async () => {
+    await syncBlockStateForAllTabs();
+    await injectReminderForTab(addedTabId);
+  });
+}
+
+async function handleTabAttached(tabId, attachInfo) {
+  if (!isSessionActive() || tabId !== state.lockedTabId) return;
+  state.lockedWindowId = attachInfo.newWindowId;
+  await saveState();
+}
+
 async function handleWindowFocusChanged(windowId) {
-  await loadState();
   if (!isTabLockActive()) return;
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
 
@@ -303,49 +381,74 @@ async function handleWindowFocusChanged(windowId) {
   }
 }
 
-function schedulePomodoroAlarm() {
+async function schedulePomodoroAlarm() {
   const phase = POMODORO_CYCLE[state.pomodoroPhase];
   const isFocus = state.pomodoroState === "focus";
   const durationMinutes = isFocus ? phase.focus : phase.break;
 
   state.pomodoroEndTime = Date.now() + durationMinutes * 60 * 1000;
   state.pomodoroBreakDuration = isFocus ? phase.break : null;
-  saveState();
+  await saveState();
 
   const alarmName = isFocus ? ALARM_FOCUS : ALARM_BREAK;
-  chrome.alarms.create(alarmName, { when: state.pomodoroEndTime });
+  const staleAlarmName = isFocus ? ALARM_BREAK : ALARM_FOCUS;
+  await chrome.alarms.clear(staleAlarmName);
+  await chrome.alarms.create(alarmName, { when: state.pomodoroEndTime });
 }
 
 async function handleAlarm(alarm) {
-  if (alarm.name === ALARM_FOCUS) {
+  if (state.mode !== "pomodoro") return;
+  if (alarm.name === ALARM_FOCUS && state.pomodoroState === "focus") {
     state.pomodoroState = "break";
+    await schedulePomodoroAlarm();
+    updateIcon();
+    queueDeferredWork(syncBlockStateForAllTabs);
+  } else if (alarm.name === ALARM_BREAK && state.pomodoroState === "break") {
     state.pomodoroPhase = (state.pomodoroPhase + 1) % POMODORO_CYCLE.length;
-    schedulePomodoroAlarm();
-    updateIcon();
-    await syncBlockStateForAllTabs();
-  } else if (alarm.name === ALARM_BREAK) {
     state.pomodoroState = "focus";
-    schedulePomodoroAlarm();
+    await schedulePomodoroAlarm();
     updateIcon();
-    await injectReminderForLockedTabs();
-    await syncBlockStateForAllTabs();
+    queueDeferredWork(async () => {
+      await injectReminderForLockedTabs();
+      await syncBlockStateForAllTabs();
+    });
   }
 }
 
-chrome.tabs.onActivated.addListener(handleTabActivated);
-chrome.tabs.onCreated.addListener(handleTabCreated);
-chrome.tabs.onRemoved.addListener(handleTabRemoved);
-chrome.tabs.onUpdated.addListener(handleTabUpdated);
-chrome.windows.onFocusChanged.addListener(handleWindowFocusChanged);
-chrome.alarms.onAlarm.addListener(handleAlarm);
+chrome.tabs.onActivated.addListener((info) => {
+  runFreshStateEffect(() => handleTabActivated(info));
+});
+chrome.tabs.onCreated.addListener((tab) => {
+  runFreshStateEffect(() => handleTabCreated(tab));
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  runStateEvent(() => handleTabRemoved(tabId));
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  runFreshStateEffect(() => handleTabUpdated(tabId, changeInfo));
+});
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+  runStateEvent(() => handleTabReplaced(addedTabId, removedTabId));
+});
+chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
+  runStateEvent(() => handleTabAttached(tabId, attachInfo));
+});
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  runFreshStateEffect(() => handleWindowFocusChanged(windowId));
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  runStateEvent(() => handleAlarm(alarm));
+});
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  (async () => {
-    await loadState();
-
+  runStateTask(async () => {
     switch (message.action) {
       case "getState":
         return { state, pomodoroCycle: POMODORO_CYCLE };
+
+      case "unlockLock":
+        await disableLock();
+        return { locked: false };
 
       case "getTabBlockState": {
         const tabId = _sender?.tab?.id;
@@ -364,6 +467,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         state.wrongTabInterstitial = v;
         await saveState();
+        return { success: true };
+      }
+
+      case "setLeaveDomainWarning": {
+        state.leaveDomainWarning = Boolean(message.value);
+        await saveState();
+        queueDeferredWork(syncBlockStateForAllTabs);
         return { success: true };
       }
 
@@ -407,8 +517,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         state.taskText = (message.taskText || "").trim();
         state.pomodoroPhase = 0;
         state.pomodoroState = "focus";
-        schedulePomodoroAlarm();
-        await saveState();
+        await schedulePomodoroAlarm();
         updateIcon();
         queueDeferredWork(async () => {
           await injectReminderForLockedTabs();
@@ -430,20 +539,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       case "addTabToLock": {
-        if (!isTabLockActive()) return { error: "No active lock session" };
+        if (!isSessionActive()) return { error: "No active lock session" };
         const tabId = message.tabId;
         if (!tabId) return { error: "No tab ID provided" };
         const ids = getLockedTabIdsArray();
         if (ids.includes(tabId)) return { error: "Tab already in locked set" };
         state.lockedTabIds = [...ids, tabId];
         await saveState();
-        await syncBlockStateForAllTabs();
-        await injectReminderForTab(tabId);
+        queueDeferredWork(async () => {
+          await syncBlockStateForAllTabs();
+          await injectReminderForTab(tabId);
+        });
         return { success: true };
       }
 
       case "removeTabFromLock": {
-        if (!isTabLockActive()) return { error: "No active lock session" };
+        if (!isSessionActive()) return { error: "No active lock session" };
         const tabId = message.tabId;
         if (!tabId) return { error: "No tab ID provided" };
         if (tabId === state.lockedTabId) return { error: "Cannot remove primary locked tab" };
@@ -451,13 +562,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (!ids.includes(tabId)) return { error: "Tab not in locked set" };
         state.lockedTabIds = ids.filter((id) => id !== tabId);
         await saveState();
-        await removeReminderFromTab(tabId);
-        await syncBlockStateForAllTabs();
+        queueDeferredWork(async () => {
+          await removeReminderFromTab(tabId);
+          await syncBlockStateForAllTabs();
+        });
         return { success: true };
       }
 
       case "getLockedTabs": {
-        if (!isTabLockActive()) return { tabs: [] };
+        if (!isSessionActive()) return { tabs: [] };
         const ids = getLockedTabIdsArray();
         const tabInfos = [];
         for (const id of ids) {
@@ -523,20 +636,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       default:
         return { error: "Unknown action" };
     }
-  })()
+  })
     .then(sendResponse)
     .catch((e) => sendResponse({ error: e.message }));
   return true;
 });
 
-chrome.runtime.onStartup.addListener(async () => {
-  await loadState();
-  updateIcon();
-  await syncBlockStateForAllTabs();
+chrome.runtime.onStartup.addListener(() => {
+  runFreshStateEffect(async () => {
+    updateIcon();
+    await syncBlockStateForAllTabs();
+  });
 });
 
-chrome.runtime.onInstalled.addListener(async () => {
-  await loadState();
-  updateIcon();
-  await syncBlockStateForAllTabs();
+chrome.runtime.onInstalled.addListener(() => {
+  runFreshStateEffect(async () => {
+    updateIcon();
+    await syncBlockStateForAllTabs();
+  });
 });
