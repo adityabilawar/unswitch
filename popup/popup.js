@@ -27,50 +27,56 @@ const availableTabList = document.getElementById("availableTabList");
 const lifelineBtn = document.getElementById("lifelineBtn");
 const lifelineHint = document.getElementById("lifelineHint");
 const wrongTabInterstitial = document.getElementById("wrongTabInterstitial");
-
-const TAB_LOCK_STATE_KEY = "unswitch-state";
+const leaveDomainWarning = document.getElementById("leaveDomainWarning");
 
 const LIFELINE_HOLD_MS = 5000;
-
-/** Merge preference into storage so it persists even if the service worker is stale. */
-async function persistWrongTabInterstitial(value) {
-  if (value !== "breathing" && value !== "none") return;
-  const stored = await chrome.storage.local.get(TAB_LOCK_STATE_KEY);
-  const prev = stored[TAB_LOCK_STATE_KEY] || {};
-  await chrome.storage.local.set({
-    [TAB_LOCK_STATE_KEY]: { ...prev, wrongTabInterstitial: value },
-  });
-  await sendMessage("getState");
-}
+const MESSAGE_TIMEOUT_MS = 4000;
 
 function sendMessage(action, data = {}) {
-  return chrome.runtime.sendMessage({ action, ...data });
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (response) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve(response);
+    };
+    const timeoutId = window.setTimeout(() => {
+      finish({ error: "Tab Lock did not respond. Reload the extension and try again." });
+    }, MESSAGE_TIMEOUT_MS);
+
+    try {
+      chrome.runtime.sendMessage({ action, ...data }, (response) => {
+        const runtimeError = chrome.runtime.lastError;
+        if (runtimeError) {
+          finish({ error: "Tab Lock could not start. Reload the extension and try again." });
+          return;
+        }
+        finish(response || { error: "Tab Lock returned no response." });
+      });
+    } catch (_) {
+      finish({ error: "Tab Lock could not start. Reload the extension and try again." });
+    }
+  });
 }
 
 function formatTime(ms) {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 let _prevInSession = false;
-/** First unlock click shows confirmation on the button; second click unlocks. */
-let _unlockConfirmPending = false;
 
-function updateLockUI(locked, tabTitle, taskText, inSession) {
-  lockToggle.classList.toggle("locked", locked);
-  lockToggle.classList.toggle("unlock-confirm", locked && _unlockConfirmPending);
-  lockIcon.textContent = locked ? "🔒" : "🔓";
-  if (!locked) {
-    _unlockConfirmPending = false;
-  }
-  if (locked && _unlockConfirmPending) {
-    lockLabel.textContent = "Are you sure? Tap again";
-  } else {
-    lockLabel.textContent = locked ? "Unlock Tab" : "Lock Tab";
-  }
-  tabInfo.textContent = tabTitle ? `Locked to: ${tabTitle}` : "Select a tab to lock";
+function updateLockUI(locked, tabTitle, taskText, inSession, mode, pomodoroState) {
+  lockToggle.classList.toggle("locked", inSession);
+  lockIcon.textContent =
+    mode === "pomodoro" ? (pomodoroState === "break" ? "☕" : "⏱") : locked ? "🔒" : "🔓";
+  lockLabel.textContent =
+    mode === "pomodoro" ? "End Pomodoro" : inSession ? "Unlock Tab" : "Lock Tab";
+  const tabPrefix = mode === "pomodoro" && pomodoroState === "break" ? "Focus resumes on" : "Focus tab";
+  tabInfo.textContent = tabTitle ? `${tabPrefix}: ${tabTitle}` : "Select a tab to lock";
 
   if (inSession) {
     taskInputWrap.classList.add("hidden");
@@ -217,10 +223,15 @@ function updatePomodoroUI(data) {
   }
 }
 
+let refreshGeneration = 0;
 async function refreshState() {
+  const generation = ++refreshGeneration;
   try {
     const res = await sendMessage("getState");
-    if (res.error) return null;
+    if (res.error) {
+      tabInfo.textContent = res.error;
+      return null;
+    }
 
     const isLocked =
       res.state.mode === "locked" ||
@@ -243,11 +254,22 @@ async function refreshState() {
       tabTitle = tabRes.title || "No tab";
     }
 
-    updateLockUI(isLocked, tabTitle, res.state.taskText || "", inSession);
+    if (generation !== refreshGeneration) return null;
+    updateLockUI(
+      isLocked,
+      tabTitle,
+      res.state.taskText || "",
+      inSession,
+      res.state.mode,
+      res.state.pomodoroState
+    );
     if (wrongTabInterstitial) {
       const serverVal = res.state.wrongTabInterstitial;
-      const nextSelect = serverVal === "none" ? "none" : "breathing";
+      const nextSelect = serverVal === "breathing" ? "breathing" : "none";
       wrongTabInterstitial.value = nextSelect;
+    }
+    if (leaveDomainWarning) {
+      leaveDomainWarning.checked = Boolean(res.state.leaveDomainWarning);
     }
     updatePomodoroUI(res);
     if (inSession && !tabManagerBody.classList.contains("hidden")) {
@@ -261,31 +283,17 @@ async function refreshState() {
 }
 
 lockToggle.addEventListener("click", async () => {
+  if (lockToggle.disabled) return;
   const task = taskInput.value.trim();
-  if (!task && !_prevInSession) {
-    taskInput.classList.add("error");
-    taskInput.focus();
-    taskInput.placeholder = "Please enter a task first";
-    return;
-  }
   taskInput.classList.remove("error");
 
   /** Matches refreshState / updateLockUI; avoids an extra getState round-trip per click. */
   const currentlyLocked = lockToggle.classList.contains("locked");
 
-  if (currentlyLocked && !_unlockConfirmPending) {
-    _unlockConfirmPending = true;
-    lockToggle.classList.add("unlock-confirm");
-    lockLabel.textContent = "Are you sure? Tap again";
-    return;
-  }
-
-  if (currentlyLocked) {
-    _unlockConfirmPending = false;
-    lockToggle.classList.remove("unlock-confirm");
-  }
-
-  const res = await sendMessage("toggleLock", { taskText: task });
+  lockToggle.disabled = true;
+  ++refreshGeneration;
+  const res = await sendMessage(currentlyLocked ? "unlockLock" : "toggleLock", { taskText: task });
+  lockToggle.disabled = false;
   if (res.error) {
     tabInfo.textContent = res.error;
     return;
@@ -295,12 +303,6 @@ lockToggle.addEventListener("click", async () => {
 
 startPomodoro.addEventListener("click", async () => {
   const task = taskInput.value.trim();
-  if (!task) {
-    taskInput.classList.add("error");
-    taskInput.focus();
-    taskInput.placeholder = "Please enter a task first";
-    return;
-  }
   taskInput.classList.remove("error");
   const res = await sendMessage("startPomodoro", { taskText: task });
   if (res.error) {
@@ -384,17 +386,12 @@ addTabBtn.addEventListener("click", async () => {
 });
 
 taskInput.addEventListener("input", () => {
-  if (taskInput.value.trim()) {
-    taskInput.classList.remove("error");
-    taskInput.placeholder = "What do you need to finish?";
-  }
+  taskInput.classList.remove("error");
 });
 
 wrongTabInterstitial?.addEventListener("change", async () => {
   const chosen = wrongTabInterstitial.value;
   if (chosen !== "breathing" && chosen !== "none") return;
-
-  await persistWrongTabInterstitial(chosen);
 
   const res = await sendMessage("setWrongTabInterstitial", { value: chosen });
 
@@ -405,7 +402,29 @@ wrongTabInterstitial?.addEventListener("change", async () => {
   await refreshState();
 });
 
+leaveDomainWarning?.addEventListener("change", async () => {
+  const res = await sendMessage("setLeaveDomainWarning", {
+    value: leaveDomainWarning.checked,
+  });
+  if (res?.error) tabInfo.textContent = res.error;
+  await refreshState();
+});
+
+lifelineBtn.addEventListener("keydown", (event) => {
+  if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+    event.preventDefault();
+    startLifelineHold();
+  }
+});
+
+lifelineBtn.addEventListener("keyup", (event) => {
+  if (event.key === " " || event.key === "Enter") cancelLifelineHold();
+});
+
 refreshState();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes["unswitch-state"]) refreshState();
+});
 const timerInterval = setInterval(refreshState, 1000);
 
 window.addEventListener("unload", () => clearInterval(timerInterval));

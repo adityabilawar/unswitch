@@ -3,6 +3,9 @@
  */
 
 (async function () {
+  if (typeof window.__unswitchReminderCleanup === "function") {
+    window.__unswitchReminderCleanup();
+  }
   const existingBanner = document.getElementById("unswitch-reminder");
   if (existingBanner) existingBanner.remove();
 
@@ -104,6 +107,18 @@
     saveCurrentPosition();
   }
 
+  function handleSessionChange(changes, area) {
+    const change = changes["unswitch-state"];
+    if (area === "local" && change && (
+      change.newValue?.mode !== change.oldValue?.mode ||
+      change.newValue?.pomodoroState !== change.oldValue?.pomodoroState ||
+      change.newValue?.taskText !== change.oldValue?.taskText ||
+      JSON.stringify(change.newValue?.lockedTabIds) !== JSON.stringify(change.oldValue?.lockedTabIds)
+    )) {
+      window.__unswitchReminderCleanup?.();
+    }
+  }
+
   banner.addEventListener("pointerdown", onPointerDown);
   banner.addEventListener("pointermove", onPointerMove);
   banner.addEventListener("pointerup", endDrag);
@@ -111,5 +126,18 @@
   banner.addEventListener("lostpointercapture", endDrag);
   banner.addEventListener("dblclick", onDoubleClick);
   window.addEventListener("resize", handleResize);
+  chrome.storage.onChanged.addListener(handleSessionChange);
+  window.__unswitchReminderCleanup = () => {
+    chrome.storage.onChanged.removeListener(handleSessionChange);
+    window.removeEventListener("resize", handleResize);
+    banner.removeEventListener("pointerdown", onPointerDown);
+    banner.removeEventListener("pointermove", onPointerMove);
+    banner.removeEventListener("pointerup", endDrag);
+    banner.removeEventListener("pointercancel", endDrag);
+    banner.removeEventListener("lostpointercapture", endDrag);
+    banner.removeEventListener("dblclick", onDoubleClick);
+    banner.remove();
+    delete window.__unswitchReminderCleanup;
+  };
   document.body.appendChild(banner);
 })();

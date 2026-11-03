@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Tab Lock – Focus Mode",
-  "description": "Tab Lock and focus mode: lock to one tab, Pomodoro timer with escalating breaks, breathing ritual, and leave-site guard.",
-  "version": "1.1.1",
-  "permissions": ["tabs", "activeTab", "scripting", "alarms", "storage"],
+  "description": "Stay on one focus tab with allowed-tab groups, an optional Pomodoro timer, breathing pause, and local-only task reminders.",
+  "version": "1.2.4",
+  "permissions": ["tabs", "scripting", "alarms", "storage"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

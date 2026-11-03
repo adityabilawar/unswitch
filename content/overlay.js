@@ -8,6 +8,8 @@
   const BREATH_DURATION_MS = 10000;
   const result = await chrome.storage.local.get("unswitch-state");
   const state = result["unswitch-state"] || {};
+  if (!(state.mode === "locked" ||
+    (state.mode === "pomodoro" && state.pomodoroState === "focus"))) return;
   const taskText = (state.taskText || "").trim();
   const escapeHtml = (value) =>
     String(value)
@@ -50,7 +52,9 @@
   function teardownOverlay() {
     clearTimers();
     chrome.runtime.onMessage.removeListener(handleMessage);
+    chrome.storage.onChanged.removeListener(handleStorageChange);
     if (overlay.parentNode) overlay.remove();
+    delete window.__unswitchOverlayCleanup;
   }
 
   function updateBreathUi() {
@@ -77,7 +81,15 @@
     }
   }
 
+  function handleStorageChange(changes, area) {
+    if (area !== "local" || !changes["unswitch-state"]) return;
+    // Cancel the ritual on any session transition; stale timers must not redirect.
+    teardownOverlay();
+  }
+
   chrome.runtime.onMessage.addListener(handleMessage);
+  chrome.storage.onChanged.addListener(handleStorageChange);
+  window.__unswitchOverlayCleanup = teardownOverlay;
 
   const startTime = Date.now();
   updateBreathUi();

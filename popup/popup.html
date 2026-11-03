@@ -15,7 +15,7 @@
       </header>
       <div class="tab-info" id="tabInfo">Loading...</div>
       <div class="task-input-wrap" id="taskInputWrap">
-        <input type="text" class="task-input" id="taskInput" placeholder="What do you need to finish?" maxlength="200" required />
+        <input type="text" class="task-input" id="taskInput" placeholder="Task (optional)" maxlength="200" />
       </div>
       <div class="task-display hidden" id="taskDisplay">
         <span class="task-display-label">Current task</span>
@@ -25,8 +25,12 @@
         <label class="preference-label" for="wrongTabInterstitial">Blocked tab</label>
         <select class="preference-select" id="wrongTabInterstitial" name="wrongTabInterstitial">
           <option value="breathing">Breathing ritual (10s)</option>
-          <option value="none">Tab lock only</option>
+          <option value="none">Return immediately</option>
         </select>
+        <label class="checkbox-row" for="leaveDomainWarning">
+          <input type="checkbox" id="leaveDomainWarning" />
+          <span>Ask before links leave the current site</span>
+        </label>
       </div>
       <button class="lock-toggle" id="lockToggle" type="button">
         <span class="lock-icon" id="lockIcon"></span>
