@@ -28,6 +28,18 @@ const lifelineBtn = document.getElementById("lifelineBtn");
 const lifelineHint = document.getElementById("lifelineHint");
 const wrongTabInterstitial = document.getElementById("wrongTabInterstitial");
 const leaveDomainWarning = document.getElementById("leaveDomainWarning");
+const pomodoroDesc = document.getElementById("pomodoroDesc");
+const sessionGate = document.getElementById("sessionGate");
+const gatePassword = document.getElementById("gatePassword");
+const gatePhrase = document.getElementById("gatePhrase");
+const gateNote = document.getElementById("gateNote");
+const proBadge = document.getElementById("proBadge");
+const proLead = document.getElementById("proLead");
+const proPlans = document.getElementById("proPlans");
+const proMessage = document.getElementById("proMessage");
+const licenseKey = document.getElementById("licenseKey");
+const activateLicense = document.getElementById("activateLicense");
+const openPro = document.getElementById("openPro");
 
 const LIFELINE_HOLD_MS = 5000;
 const MESSAGE_TIMEOUT_MS = 4000;
@@ -219,10 +231,13 @@ function updatePomodoroUI(data) {
   phaseLabel.textContent = isBreak ? "Break" : "Focus";
   phaseLabel.classList.toggle("break", isBreak);
 
+  const cycle = data.pomodoroCycle || [];
+  const phaseIndex = data.state.pomodoroPhase || 0;
+  const nextFocus = cycle.length ? cycle[(phaseIndex + 1) % cycle.length]?.focus : null;
   if (data.state.pomodoroBreakDuration) {
     breakInfo.textContent = `Next break: ${data.state.pomodoroBreakDuration} min`;
-  } else if (isBreak) {
-    breakInfo.textContent = "Next focus: 60 min";
+  } else if (isBreak && nextFocus) {
+    breakInfo.textContent = `Next focus: ${nextFocus} min`;
   } else {
     breakInfo.textContent = "";
   }
@@ -282,6 +297,7 @@ async function refreshState() {
       leaveDomainWarning.checked = Boolean(res.state.leaveDomainWarning);
     }
     updatePomodoroUI(res);
+    updateProUI(res.pro, inSession);
     if (inSession && !tabManagerBody.classList.contains("hidden")) {
       await renderLockedTabs();
     }
@@ -312,6 +328,7 @@ lockToggle.addEventListener("click", async () => {
       taskText: task,
       intent,
       tabId,
+      ...gatePayload(),
     });
     if (res.error) {
       tabInfo.textContent = res.error;
@@ -362,7 +379,10 @@ const lifelineHold = createHoldTimer({
   onFire() {
     lifelineBtn.classList.remove("holding");
     lifelineHint.textContent = "Ending session...";
-    sendMessage("lifeline").then(() => refreshState()).finally(resetLifelineVisual);
+    sendMessage("lifeline", gatePayload()).then((res) => {
+      if (res?.error && gateNote) gateNote.textContent = res.error;
+      return refreshState();
+    }).finally(resetLifelineVisual);
   },
 });
 
@@ -441,9 +461,87 @@ lifelineBtn.addEventListener("keyup", (event) => {
   if (event.key === " " || event.key === "Enter") releaseLifelineHold();
 });
 
+function gatePayload() {
+  return {
+    password: gatePassword?.value || "",
+    challenge: gatePhrase?.value || "",
+  };
+}
+
+function formatCycle(cycle) {
+  if (!Array.isArray(cycle) || !cycle.length) return "60 min focus → 5/10/20 min breaks";
+  const focus = cycle[0].focus;
+  const sameFocus = cycle.every((phase) => phase.focus === focus);
+  if (sameFocus) return `${focus} min focus → ${cycle.map((phase) => phase.break).join("/")} min breaks`;
+  return cycle.map((phase) => `${phase.focus} focus / ${phase.break} break`).join(" → ");
+}
+
+function updateProUI(pro, inSession) {
+  if (!pro || !proBadge) return;
+  const gate = pro.sessionGate || {};
+  const showGate = inSession && (gate.timedUntil || gate.phrase || gate.password);
+  sessionGate?.classList.toggle("hidden", !showGate);
+  gatePassword?.classList.toggle("hidden", !gate.password);
+  gatePhrase?.classList.toggle("hidden", !gate.phrase);
+  if (gate.timedUntil) {
+    const clock = new Date(gate.timedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (gateNote) gateNote.textContent = `Strict mode is on until ${clock}. Closing the focus tab still ends the session.`;
+    lifelineHint.textContent = "Strict mode is on";
+  } else if (showGate && gateNote && !gateNote.textContent) {
+    gateNote.textContent = "Ending this session needs the field above.";
+  }
+
+  proBadge.textContent = pro.entitled ? `Pro${pro.plan ? ` · ${pro.plan}` : ""}` : "Free";
+  proPlans?.classList.toggle("hidden", Boolean(pro.entitled));
+  document.querySelector(".pro-activate")?.classList.toggle("hidden", Boolean(pro.entitled));
+  if (!showGate && gateNote) gateNote.textContent = "";
+  if (pro.entitled) {
+    proLead.textContent = "Pro is active on this browser. Open settings for timers, strict mode, schedules, focus sets, stats, and the blocked screen.";
+  }
+  if (pomodoroDesc && !inSession) pomodoroDesc.textContent = formatCycle(
+    pro.entitled && pro.settings?.pomodoro?.useCustom ? pro.settings.pomodoro.cycle : null
+  );
+
+  if (proPlans && proPlans.childElementCount === 0 && Array.isArray(pro.plans)) {
+    for (const plan of pro.plans) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "plan-button";
+      const title = document.createElement("strong");
+      title.textContent = plan.label;
+      const detail = document.createElement("span");
+      detail.textContent = plan.summary;
+      button.append(title, detail);
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        const res = await sendMessage("startCheckout", { plan: plan.id });
+        if (proMessage) {
+          proMessage.textContent = res.error || "Checkout opened in a new tab. Paste the license key here when it finishes.";
+        }
+        button.disabled = false;
+      });
+      proPlans.append(button);
+    }
+  }
+}
+
+openPro?.addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("pro/pro.html") });
+});
+
+activateLicense?.addEventListener("click", async () => {
+  const res = await sendMessage("activateLicense", { token: licenseKey?.value || "" });
+  if (proMessage) proMessage.textContent = res.error || (res.pro?.entitled ? "Pro is active." : "License checked.");
+  if (res.pro?.entitled && licenseKey) licenseKey.value = "";
+  await refreshState();
+});
+
 refreshState();
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes["unswitch-state"]) refreshState();
+  if (area === "local" && (changes["unswitch-state"] || changes["unswitch-license"] || changes["unswitch-pro-settings"])) {
+    refreshState();
+  }
+  if (area === "sync" && changes["unswitch-pro-settings"]) refreshState();
 });
 const timerInterval = setInterval(refreshState, 1000);
 

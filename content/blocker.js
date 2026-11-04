@@ -53,6 +53,8 @@
           <p class="unswitch-blocker-message">
             Return to your focus tab or unlock Tab Lock to keep browsing.
           </p>
+          <p class="unswitch-blocker-quote" hidden></p>
+          <img class="unswitch-blocker-image" alt="" hidden>
           <p class="unswitch-blocker-task" hidden></p>
         </div>
       </div>
@@ -84,7 +86,25 @@
 
     try {
       const result = await chrome.storage.local.get(STORAGE_KEY);
-      const taskText = (result[STORAGE_KEY]?.taskText || "").trim();
+      const stored = result[STORAGE_KEY] || {};
+      const display = stored.proDisplay || null;
+      const quoteEl = blocker.querySelector(".unswitch-blocker-quote");
+      const imageEl = blocker.querySelector(".unswitch-blocker-image");
+      const quote = String(display?.quote || "").trim();
+      if (quoteEl) {
+        quoteEl.hidden = !quote;
+        quoteEl.textContent = quote;
+      }
+      if (imageEl) {
+        const imageUrl =
+          typeof display?.imageUrl === "string" && display.imageUrl.startsWith("https://")
+            ? display.imageUrl
+            : "";
+        imageEl.hidden = !imageUrl;
+        if (imageUrl) imageEl.src = imageUrl;
+        else imageEl.removeAttribute("src");
+      }
+      const taskText = (stored.taskText || "").trim();
       if (taskText) {
         taskEl.hidden = false;
         taskEl.innerHTML = `Focus: ${escapeHtml(taskText)}`;

@@ -143,3 +143,8 @@
   transform: scale(0.88);
 }
 
+#unswitch-overlay.unswitch-overlay-breathe-hold .unswitch-breath-ring,
+#unswitch-overlay.unswitch-overlay-breathe-hold .unswitch-breath-core {
+  transform: scale(1);
+}
+

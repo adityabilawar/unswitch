@@ -578,3 +578,111 @@ body {
 .hidden {
   display: none !important;
 }
+
+.gate-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.gate-note,
+.pro-message {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--break-amber);
+}
+
+.pro-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pro-card-top .section-title {
+  margin-bottom: 0;
+}
+
+.pro-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #bfdbfe;
+  background: rgba(96, 165, 250, 0.16);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
+.pro-lead {
+  margin: 10px 0 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-soft);
+}
+
+.pro-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.plan-button {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.plan-button strong {
+  display: block;
+  font-size: 13px;
+}
+
+.plan-button span {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.plan-button:hover,
+.btn-secondary:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.pro-activate {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.pro-activate .task-input {
+  margin: 0;
+}
+
+.btn-secondary {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pro-activate .btn-secondary {
+  width: auto;
+  flex: 0 0 auto;
+}

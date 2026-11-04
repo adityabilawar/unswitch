@@ -100,6 +100,21 @@ body.unswitch-blocked {
   color: #aeb8ca;
 }
 
+.unswitch-blocker-quote {
+  margin: 0;
+  max-width: 36em;
+  font-size: 18px;
+  line-height: 1.45;
+  color: #f8fafc;
+}
+
+.unswitch-blocker-image {
+  max-width: min(100%, 360px);
+  max-height: 180px;
+  border-radius: 16px;
+  object-fit: cover;
+}
+
 .unswitch-blocker-task {
   margin: 4px 0 0;
   padding: 10px 14px;
