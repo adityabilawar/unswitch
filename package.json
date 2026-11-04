@@ -1,8 +1,8 @@
 {
   "name": "tab-lock-focus-mode",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "private": true,
   "scripts": {
-    "check": "node --check background.js && node --check popup/popup.js && node --test"
+    "check": "node --check background.js && node --check popup/popup.js && node --check popup/hold.js && node --test"
   }
 }

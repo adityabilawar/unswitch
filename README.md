@@ -2,7 +2,7 @@
 
 A Chrome extension that keeps you on your focus tab. Two modes: instant tab lock and a Pomodoro-style focus timer with escalating breaks.
 
-**Version:** 1.2.2 (see `manifest.json`)
+**Version:** 1.2.5 (see `manifest.json`)
 
 ## Features
 

@@ -83,8 +83,13 @@
 
   function handleStorageChange(changes, area) {
     if (area !== "local" || !changes["unswitch-state"]) return;
-    // Cancel the ritual on any session transition; stale timers must not redirect.
-    teardownOverlay();
+    const next = changes["unswitch-state"].newValue;
+    const active =
+      next?.mode === "locked" ||
+      (next?.mode === "pomodoro" && next?.pomodoroState === "focus");
+    // Metadata writes (tab URL, allowed-tab rebinding) must not cancel the ritual.
+    // Ending the session still clears the timer so it cannot redirect later.
+    if (!active) teardownOverlay();
   }
 
   chrome.runtime.onMessage.addListener(handleMessage);

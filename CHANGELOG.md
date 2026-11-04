@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.5
+
+- Restored a Pomodoro after the service worker or browser restarted by re-arming `chrome.alarms` from the saved deadline, and advanced overdue phases from that deadline so the clock does not reset or drift.
+- Rebound allowed tabs by URL after a browser restart, including tabs in other windows. Blocking stays off until that rebind finishes, and a session whose focus tab is really gone ends instead of blocking every tab.
+- Kept the same-browser-session tab id when the focus tab navigates, and on extension update. Tab ids are only treated as stale when session storage shows the browser has restarted.
+- Ignored a repeated lock or Pomodoro start so a double click cannot unlock the session or restart the timer. The popup sends the tab id from its own window and an explicit lock or unlock intent.
+- Stopped an in-flight tab switch from pulling focus back after unlock.
+- Lifeline now completes from a real 5 second deadline and keeps listening if the pointer leaves the button.
+
 ## 1.2.4
 
 - Immediate return no longer waits for content-script synchronization on the distracting tab.
