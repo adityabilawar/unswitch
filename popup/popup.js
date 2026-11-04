@@ -67,6 +67,16 @@ function formatTime(ms) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+/** The popup's current window is the window that opened it. The service worker's is not. */
+async function currentWindowTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tab || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 let _prevInSession = false;
 
 function updateLockUI(locked, tabTitle, taskText, inSession, mode, pomodoroState) {
@@ -250,8 +260,8 @@ async function refreshState() {
         tabTitle = "Tab closed";
       }
     } else {
-      const tabRes = await sendMessage("getCurrentTab");
-      tabTitle = tabRes.title || "No tab";
+      const tab = await currentWindowTab();
+      tabTitle = tab?.title || "No tab";
     }
 
     if (generation !== refreshGeneration) return null;
@@ -288,81 +298,91 @@ lockToggle.addEventListener("click", async () => {
   taskInput.classList.remove("error");
 
   /** Matches refreshState / updateLockUI; avoids an extra getState round-trip per click. */
-  const currentlyLocked = lockToggle.classList.contains("locked");
+  const intent = lockToggle.classList.contains("locked") ? "unlock" : "lock";
 
   lockToggle.disabled = true;
   ++refreshGeneration;
-  const res = await sendMessage(currentlyLocked ? "unlockLock" : "toggleLock", { taskText: task });
-  lockToggle.disabled = false;
-  if (res.error) {
-    tabInfo.textContent = res.error;
-    return;
+  try {
+    let tabId;
+    if (intent === "lock") {
+      const tab = await currentWindowTab();
+      tabId = tab?.id;
+    }
+    const res = await sendMessage(intent === "unlock" ? "unlockLock" : "toggleLock", {
+      taskText: task,
+      intent,
+      tabId,
+    });
+    if (res.error) {
+      tabInfo.textContent = res.error;
+      return;
+    }
+    await refreshState();
+  } finally {
+    lockToggle.disabled = false;
   }
-  await refreshState();
 });
 
 startPomodoro.addEventListener("click", async () => {
+  if (startPomodoro.disabled) return;
   const task = taskInput.value.trim();
   taskInput.classList.remove("error");
-  const res = await sendMessage("startPomodoro", { taskText: task });
-  if (res.error) {
-    tabInfo.textContent = res.error;
-    return;
+  startPomodoro.disabled = true;
+  try {
+    const tab = await currentWindowTab();
+    const res = await sendMessage("startPomodoro", { taskText: task, tabId: tab?.id });
+    if (res.error) {
+      tabInfo.textContent = res.error;
+      return;
+    }
+    await refreshState();
+  } finally {
+    startPomodoro.disabled = false;
   }
-  await refreshState();
 });
 
-let lifelineHoldTimer = null;
-
-function startLifelineHold() {
-  lifelineBtn.classList.add("holding");
-  let elapsed = 0;
-  const interval = 100;
-
-  lifelineHoldTimer = setInterval(() => {
-    elapsed += interval;
-    lifelineHint.textContent = `Hold ${Math.ceil((LIFELINE_HOLD_MS - elapsed) / 1000)}s...`;
-    if (elapsed >= LIFELINE_HOLD_MS) {
-      clearInterval(lifelineHoldTimer);
-      lifelineHoldTimer = null;
-      cancelLifeline();
-    }
-  }, interval);
-}
-
-function cancelLifelineHold() {
-  if (lifelineHoldTimer) {
-    clearInterval(lifelineHoldTimer);
-    lifelineHoldTimer = null;
-  }
+function resetLifelineVisual() {
   lifelineBtn.classList.remove("holding");
   lifelineHint.textContent = "Hold 5 sec to cancel";
 }
 
-async function cancelLifeline() {
-  await sendMessage("lifeline");
-  cancelLifelineHold();
-  await refreshState();
+const lifelineHold = createHoldTimer({
+  durationMs: LIFELINE_HOLD_MS,
+  now: () => Date.now(),
+  schedule(tick) {
+    return setInterval(tick, 100);
+  },
+  cancelSchedule(timerId) {
+    clearInterval(timerId);
+  },
+  onTick(remaining) {
+    lifelineBtn.classList.add("holding");
+    lifelineHint.textContent = `Hold ${Math.ceil(remaining / 1000)}s...`;
+  },
+  onFire() {
+    lifelineBtn.classList.remove("holding");
+    lifelineHint.textContent = "Ending session...";
+    sendMessage("lifeline").then(() => refreshState()).finally(resetLifelineVisual);
+  },
+});
+
+function releaseLifelineHold() {
+  const result = lifelineHold.release();
+  if (result === "cancelled") resetLifelineVisual();
 }
 
-lifelineBtn.addEventListener("mousedown", (e) => {
-  if (e.button === 0) startLifelineHold();
+lifelineBtn.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  if (!lifelineHold.start()) return;
+  try {
+    lifelineBtn.setPointerCapture(event.pointerId);
+  } catch (_) {
+    lifelineBtn.addEventListener("pointerleave", releaseLifelineHold, { once: true });
+  }
 });
 
-lifelineBtn.addEventListener("mouseup", cancelLifelineHold);
-lifelineBtn.addEventListener("mouseleave", cancelLifelineHold);
-
-lifelineBtn.addEventListener("touchstart", (e) => {
-  e.preventDefault();
-  startLifelineHold();
-});
-
-lifelineBtn.addEventListener("touchend", (e) => {
-  e.preventDefault();
-  cancelLifelineHold();
-});
-
-lifelineBtn.addEventListener("touchcancel", cancelLifelineHold);
+lifelineBtn.addEventListener("pointerup", releaseLifelineHold);
+lifelineBtn.addEventListener("pointercancel", releaseLifelineHold);
 
 tabManagerToggle.addEventListener("click", async () => {
   const isExpanding = tabManagerBody.classList.contains("hidden");
@@ -413,12 +433,12 @@ leaveDomainWarning?.addEventListener("change", async () => {
 lifelineBtn.addEventListener("keydown", (event) => {
   if ((event.key === " " || event.key === "Enter") && !event.repeat) {
     event.preventDefault();
-    startLifelineHold();
+    lifelineHold.start();
   }
 });
 
 lifelineBtn.addEventListener("keyup", (event) => {
-  if (event.key === " " || event.key === "Enter") cancelLifelineHold();
+  if (event.key === " " || event.key === "Enter") releaseLifelineHold();
 });
 
 refreshState();
