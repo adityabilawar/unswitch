@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- Added an optional Pro tier. Tab lock, allowed tabs, the 60-minute Pomodoro, the breathing pause, reminders, and Lifeline stay free.
+- Pro adds custom Pomodoro lengths and sounds, strict mode, a recurring auto-lock schedule, saved focus sets, a local stats dashboard with export, a custom blocked screen, and password protection with `chrome.storage.sync`.
+- Checkout and license checks go through a small test-mode server. The extension does not contain Stripe secret keys. Live charges, deployment, and Chrome Web Store publishing are not part of this change.
+
 ## 1.2.5
 
 - Restored a Pomodoro after the service worker or browser restarted by re-arming `chrome.alarms` from the saved deadline, and advanced overdue phases from that deadline so the clock does not reset or drift.

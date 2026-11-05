@@ -1,7 +1,16 @@
 /**
  * Tab Lock – Focus Mode
- * Background service worker - core tab lock and pomodoro logic
+ * Background service worker - core tab lock and pomodoro logic.
+ * Pro behavior lives behind an entitlement check. Free sessions never require it.
  */
+
+importScripts(
+  "shared/pro-config.js",
+  "shared/entitlement.js",
+  "shared/stats.js",
+  "shared/pro-settings.js",
+  "shared/rituals.js"
+);
 
 const POMODORO_CYCLE = [
   { focus: 60, break: 5 },
@@ -12,9 +21,17 @@ const POMODORO_CYCLE = [
 const ALARM_FOCUS = "pomodoro-focus";
 const ALARM_BREAK = "pomodoro-break";
 const ALARM_RECONCILE = "tab-lock-reconcile";
+const ALARM_SCHEDULE = "tab-lock-schedule";
 const STORAGE_KEY = "unswitch-state";
 const LIVE_SESSION_KEY = "unswitch-live-session";
 const RECONCILE_ATTEMPTS_KEY = "unswitch-reconcile-attempts";
+const PRO_SETTINGS_KEY = "unswitch-pro-settings";
+const LICENSE_KEY = "unswitch-license";
+const STATS_KEY = "unswitch-stats";
+const INSTALL_KEY = "unswitch-install-id";
+const API_BASE_KEY = "unswitch-api-base";
+const STRICT_UNTIL_KEY = "unswitch-strict-until";
+const SCHEDULE_CURSOR_KEY = "unswitch-schedule-cursor";
 const MAX_TAB_RECONCILE_ATTEMPTS = 5;
 
 const DEFAULT_STATE = {
@@ -34,7 +51,22 @@ const DEFAULT_STATE = {
   pomodoroState: null,
   pomodoroEndTime: null,
   pomodoroBreakDuration: null,
+  /** Set only for a Pro custom cycle. Null keeps the free 60 / 5 / 10 / 20 cycle. */
+  pomodoroCycle: null,
+  pomodoroSound: null,
+  /** Hostnames restored from a Pro focus set. Empty for every free session. */
+  allowedHosts: null,
+  /** Sanitized Pro blocked-screen options, or null when the install is not entitled. */
+  proDisplay: null,
 };
+
+let proSettings = null;
+let licenseRecord = null;
+let statsRecord = null;
+let installId = "";
+let apiBaseOverride = "";
+let strictUntil = null;
+let scheduleCursor = "";
 
 let state = { ...DEFAULT_STATE };
 /** False after a browser restart until saved tabs are rebound to live ids. */
@@ -85,13 +117,393 @@ function queueDeferredWork(fn) {
 }
 
 async function loadState() {
-  const result = await chrome.storage.local.get(STORAGE_KEY);
+  const result = await chrome.storage.local.get([
+    STORAGE_KEY,
+    PRO_SETTINGS_KEY,
+    LICENSE_KEY,
+    STATS_KEY,
+    INSTALL_KEY,
+    API_BASE_KEY,
+    STRICT_UNTIL_KEY,
+    SCHEDULE_CURSOR_KEY,
+  ]);
   state = { ...DEFAULT_STATE, ...result[STORAGE_KEY] };
   if (state.lockedTabId && (!state.lockedTabIds || state.lockedTabIds.length === 0)) {
     state.lockedTabIds = [state.lockedTabId];
   }
+  proSettings = TabLockProSettings.sanitize(result[PRO_SETTINGS_KEY]);
+  licenseRecord = result[LICENSE_KEY] || null;
+  statsRecord = TabLockStats.normalize(result[STATS_KEY]);
+  installId = typeof result[INSTALL_KEY] === "string" ? result[INSTALL_KEY] : "";
+  apiBaseOverride = typeof result[API_BASE_KEY] === "string" ? result[API_BASE_KEY] : "";
+  strictUntil = typeof result[STRICT_UNTIL_KEY] === "number" ? result[STRICT_UNTIL_KEY] : null;
+  scheduleCursor = typeof result[SCHEDULE_CURSOR_KEY] === "string" ? result[SCHEDULE_CURSOR_KEY] : "";
   liveSessionKnown = await hasLiveSession();
   return state;
+}
+
+function isPro() {
+  try {
+    return TabLockEntitlement.hasCachedAccess(
+      licenseRecord,
+      Date.now(),
+      TabLockProConfig.REVALIDATE_MS,
+      TabLockProConfig.OFFLINE_GRACE_MS
+    ).pro;
+  } catch (_) {
+    return false;
+  }
+}
+
+function effectiveApiBase() {
+  const configured = TabLockProConfig.API_BASE || "";
+  return TabLockProSettings.normalizeApiBase(apiBaseOverride || configured);
+}
+
+function proSnapshot() {
+  const access = TabLockEntitlement.hasCachedAccess(
+    licenseRecord,
+    Date.now(),
+    TabLockProConfig.REVALIDATE_MS,
+    TabLockProConfig.OFFLINE_GRACE_MS
+  );
+  const now = Date.now();
+  const timed =
+    access.pro &&
+    proSettings?.strict?.mode === "timed" &&
+    typeof strictUntil === "number" &&
+    strictUntil > now;
+  return {
+    entitled: Boolean(access.pro),
+    plan: access.pro ? access.plan : null,
+    status: access.status || null,
+    currentPeriodEnd: access.currentPeriodEnd ?? null,
+    stale: Boolean(access.stale),
+    settings: TabLockProSettings.publicSettings(proSettings),
+    stats: access.pro ? TabLockStats.present(statsRecord, now) : null,
+    plans: TabLockProConfig.listPlans(),
+    apiBase: effectiveApiBase(),
+    installId: installId || "",
+    sessionGate: {
+      timedUntil: timed ? strictUntil : null,
+      phrase: Boolean(access.pro && proSettings?.strict?.mode === "phrase" && isSessionActive()),
+      password: Boolean(access.pro && proSettings?.protection?.enabled),
+    },
+  };
+}
+
+function cycleForDisplay() {
+  if (state.mode === "pomodoro") return activeCycle();
+  if (isPro() && proSettings?.pomodoro?.useCustom) return proSettings.pomodoro.cycle;
+  return POMODORO_CYCLE;
+}
+
+async function persistStats() {
+  await chrome.storage.local.set({ [STATS_KEY]: statsRecord });
+}
+
+async function noteSessionFocus(newSession) {
+  if (!isPro()) return;
+  statsRecord = TabLockStats.noteFocusStart(statsRecord, Date.now(), newSession);
+  await persistStats();
+}
+
+async function noteSessionPause() {
+  if (!isPro()) return;
+  statsRecord = TabLockStats.noteFocusPause(statsRecord, Date.now());
+  await persistStats();
+}
+
+async function noteSwitchAttempt() {
+  if (!isPro()) return;
+  statsRecord = TabLockStats.noteSwitch(statsRecord, Date.now());
+  await persistStats();
+}
+
+async function armStrictIfNeeded() {
+  if (!isPro() || proSettings?.strict?.mode !== "timed") return;
+  if (typeof strictUntil === "number" && strictUntil > Date.now()) return;
+  strictUntil = Date.now() + proSettings.strict.durationMinutes * 60 * 1000;
+  await chrome.storage.local.set({ [STRICT_UNTIL_KEY]: strictUntil });
+}
+
+async function endSessionDenial(message) {
+  if (!isPro()) return null;
+  let passwordOk = true;
+  if (proSettings?.protection?.enabled) {
+    passwordOk = await TabLockProSettings.verifyPassword(message?.password || "", proSettings.protection);
+  }
+  return TabLockProSettings.sessionEndDenial({
+    settings: proSettings,
+    strictUntil,
+    entitled: true,
+    now: Date.now(),
+    challenge: message?.challenge || "",
+    passwordOk,
+  });
+}
+
+async function proMutationDenial(message) {
+  if (!isPro()) return { error: "Pro feature", code: "pro" };
+  const now = Date.now();
+  if (proSettings?.strict?.mode === "timed" && typeof strictUntil === "number" && strictUntil > now) {
+    return TabLockProSettings.sessionEndDenial({
+      settings: proSettings,
+      strictUntil,
+      entitled: true,
+      now,
+      challenge: "",
+      passwordOk: true,
+    });
+  }
+  if (isSessionActive() && proSettings?.strict?.mode === "phrase") {
+    const denial = TabLockProSettings.sessionEndDenial({
+      settings: proSettings,
+      strictUntil: null,
+      entitled: true,
+      now,
+      challenge: message?.challenge || "",
+      passwordOk: true,
+    });
+    if (denial) return denial;
+  }
+  if (proSettings?.protection?.enabled) {
+    const ok = await TabLockProSettings.verifyPassword(message?.password || "", proSettings.protection);
+    if (!ok) return { error: "Enter your protection password to change Pro settings.", code: "protection" };
+  }
+  return null;
+}
+
+function customPomodoroSelection() {
+  if (!isPro()) return { cycle: null, sound: null };
+  const sound =
+    proSettings?.pomodoro?.sound && proSettings.pomodoro.sound !== "none" ? proSettings.pomodoro.sound : null;
+  const cycle = proSettings?.pomodoro?.useCustom
+    ? proSettings.pomodoro.cycle.map((phase) => ({ focus: phase.focus, break: phase.break }))
+    : null;
+  return { cycle, sound };
+}
+
+async function persistProDisplayIfNeeded() {
+  const display = isPro() ? TabLockProSettings.publicDisplay(proSettings) : null;
+  const previous = state.proDisplay || null;
+  if (JSON.stringify(previous) === JSON.stringify(display)) return;
+  state.proDisplay = display;
+  await saveState();
+}
+
+async function ensureInstallId() {
+  if (installId) return installId;
+  installId = crypto.randomUUID();
+  await chrome.storage.local.set({ [INSTALL_KEY]: installId });
+  return installId;
+}
+
+function applyUninstallUrl() {
+  if (typeof chrome.runtime?.setUninstallURL !== "function") return;
+  const base = effectiveApiBase();
+  if (isPro() && proSettings?.protection?.enabled && base && installId) {
+    chrome.runtime.setUninstallURL(`${base}/api/uninstall?installId=${encodeURIComponent(installId)}`);
+    return;
+  }
+  chrome.runtime.setUninstallURL("");
+}
+
+async function hydrateProSettingsFromSync() {
+  if (!chrome.storage?.sync?.get || proSettings?.syncEnabled === false) return;
+  try {
+    const remote = await chrome.storage.sync.get(PRO_SETTINGS_KEY);
+    if (!remote?.[PRO_SETTINGS_KEY]) return;
+    proSettings = TabLockProSettings.sanitize(remote[PRO_SETTINGS_KEY]);
+    await chrome.storage.local.set({ [PRO_SETTINGS_KEY]: proSettings });
+  } catch (_) {}
+}
+
+async function saveProSettings() {
+  proSettings = TabLockProSettings.sanitize(proSettings);
+  await chrome.storage.local.set({ [PRO_SETTINGS_KEY]: proSettings });
+  let synced = false;
+  let syncError = "";
+  if (proSettings.syncEnabled !== false && chrome.storage?.sync?.set) {
+    try {
+      await chrome.storage.sync.set({ [PRO_SETTINGS_KEY]: proSettings });
+      synced = true;
+    } catch (error) {
+      syncError = error?.message || "Chrome sync failed.";
+    }
+  }
+  await persistProDisplayIfNeeded();
+  await runSchedule();
+  applyUninstallUrl();
+  return { saved: true, synced, syncError };
+}
+
+async function setScheduleCursor(key) {
+  scheduleCursor = key;
+  await chrome.storage.local.set({ [SCHEDULE_CURSOR_KEY]: key });
+}
+
+async function runSchedule(now = Date.now()) {
+  if (!isPro() || !proSettings?.schedule?.enabled) {
+    if (chrome.alarms?.clear) await chrome.alarms.clear(ALARM_SCHEDULE);
+    return;
+  }
+  const existing = await readAlarm(ALARM_SCHEDULE);
+  if (!existing) await chrome.alarms.create(ALARM_SCHEDULE, { periodInMinutes: 1 });
+  const decision = TabLockProSettings.scheduleDecision(proSettings.schedule, now, scheduleCursor);
+  if (!decision) return;
+  if (decision.action === "lock") {
+    if (isSessionActive()) {
+      await setScheduleCursor(decision.key);
+      return;
+    }
+    let tab = null;
+    try {
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      tab = active || null;
+    } catch (_) {}
+    if (!tab?.id) return;
+    await setScheduleCursor(decision.key);
+    await enableLock(tab, "");
+    return;
+  }
+  if (decision.action === "unlock" && isSessionActive()) {
+    if (proSettings.protection?.enabled) return;
+    const denial = TabLockProSettings.sessionEndDenial({
+      settings: proSettings,
+      strictUntil,
+      entitled: true,
+      now,
+      challenge: "",
+      passwordOk: true,
+    });
+    if (denial?.code === "strict") return;
+    await setScheduleCursor(decision.key);
+    await disableLock();
+  }
+}
+
+async function maybeAdmitAllowedHost(tabId, url) {
+  if (!isPro() || !isSessionActive()) return false;
+  const hosts = Array.isArray(state.allowedHosts) ? state.allowedHosts : [];
+  if (!hosts.length || getLockedTabIdSet().has(tabId)) return false;
+  const host = TabLockProSettings.hostFromUrl(url);
+  if (!host || !hosts.includes(host)) return false;
+  let tab = null;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch (_) {
+    return false;
+  }
+  const records = recordsFromState();
+  records.push(recordFromTab(tab, false));
+  applyLockedRecords(records);
+  queueDeferredWork(async () => {
+    await syncBlockStateForAllTabs();
+    await injectReminderForTab(tabId);
+  });
+  return true;
+}
+
+async function maybeRedirectBlockedTab(tabId, epoch) {
+  const target = state.proDisplay?.redirectUrl;
+  if (!isPro() || !target || epoch !== sessionEpoch || !shouldBlockTab(tabId)) return;
+  let current = "";
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    current = tabUrl(tab);
+  } catch (_) {
+    return;
+  }
+  if (epoch !== sessionEpoch || !shouldBlockTab(tabId) || current === target) return;
+  try {
+    await chrome.tabs.update(tabId, { url: target });
+  } catch (_) {}
+}
+
+async function playPhaseSound(sound) {
+  const frequencies = TabLockProSettings.SOUND_PRESETS[sound];
+  if (!frequencies || !state.lockedTabId) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: state.lockedTabId },
+      func: (tones) => {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext || !Array.isArray(tones)) return;
+        const ctx = new AudioContext();
+        const start = ctx.currentTime + 0.02;
+        tones.forEach((frequency, index) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.value = frequency;
+          const at = start + index * 0.18;
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.exponentialRampToValueAtTime(0.08, at + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(at);
+          osc.stop(at + 0.17);
+        });
+        window.setTimeout(() => ctx.close(), 1200);
+      },
+      args: [frequencies],
+    });
+  } catch (_) {}
+}
+
+async function refreshLicense(explicit) {
+  const base = effectiveApiBase();
+  if (!base) {
+    return explicit
+      ? { ...proSnapshot(), error: "Add your license server URL in Pro settings.", code: "setup" }
+      : proSnapshot();
+  }
+  try {
+    const install = await ensureInstallId();
+    const url = new URL("/api/license", base);
+    url.searchParams.set("installId", install);
+    if (licenseRecord?.token) url.searchParams.set("token", licenseRecord.token);
+    const response = await fetch(url.toString());
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "License check failed.");
+    licenseRecord = {
+      token: body.token || "",
+      plan: body.plan || null,
+      status: body.status || "inactive",
+      currentPeriodEnd: body.currentPeriodEnd ?? null,
+      checkedAt: Date.now(),
+      installId: install,
+    };
+    await chrome.storage.local.set({ [LICENSE_KEY]: licenseRecord });
+    await persistProDisplayIfNeeded();
+    await runSchedule();
+    applyUninstallUrl();
+    return proSnapshot();
+  } catch (error) {
+    const access = TabLockEntitlement.hasCachedAccess(
+      licenseRecord,
+      Date.now(),
+      TabLockProConfig.REVALIDATE_MS,
+      TabLockProConfig.OFFLINE_GRACE_MS
+    );
+    if (access.pro) return { ...proSnapshot(), stale: true };
+    return { ...proSnapshot(), entitled: false, error: error.message || "License check failed." };
+  }
+}
+
+async function refreshLicenseIfStale() {
+  const access = TabLockEntitlement.hasCachedAccess(
+    licenseRecord,
+    Date.now(),
+    TabLockProConfig.REVALIDATE_MS,
+    TabLockProConfig.OFFLINE_GRACE_MS
+  );
+  if (!effectiveApiBase()) return;
+  if (licenseRecord?.checkedAt && !access.stale && access.pro) return;
+  if (!licenseRecord && !installId) return;
+  await refreshLicense(false);
 }
 
 function getLockedTabIdsArray() {
@@ -259,9 +671,22 @@ function isTimestamp(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function activeCycle() {
+  const cycle = state.pomodoroCycle;
+  if (
+    Array.isArray(cycle) &&
+    cycle.length > 0 &&
+    cycle.every((phase) => phase && Number(phase.focus) > 0 && Number(phase.break) > 0)
+  ) {
+    return cycle;
+  }
+  return POMODORO_CYCLE;
+}
+
 function phaseAt(index) {
-  const normalized = typeof index === "number" && index >= 0 ? index % POMODORO_CYCLE.length : 0;
-  return POMODORO_CYCLE[normalized];
+  const cycle = activeCycle();
+  const normalized = typeof index === "number" && index >= 0 ? index % cycle.length : 0;
+  return cycle[normalized];
 }
 
 /**
@@ -277,7 +702,7 @@ function completeDuePhases(now) {
     changed = true;
     if (state.pomodoroState === "break") {
       const current = typeof state.pomodoroPhase === "number" ? state.pomodoroPhase : 0;
-      state.pomodoroPhase = (current + 1) % POMODORO_CYCLE.length;
+      state.pomodoroPhase = (current + 1) % activeCycle().length;
       const phase = phaseAt(state.pomodoroPhase);
       state.pomodoroState = "focus";
       state.pomodoroBreakDuration = phase.break;
@@ -563,7 +988,7 @@ function focusLockedTab(lockedTabId, lockedWindowId, epoch) {
   }
 }
 
-function beginRedirect(tabId, epoch) {
+async function beginRedirect(tabId, epoch) {
   if (epoch !== sessionEpoch || !shouldBlockTab(tabId)) return null;
   const plan = {
     epoch,
@@ -572,6 +997,8 @@ function beginRedirect(tabId, epoch) {
     lockedWindowId: state.lockedWindowId,
     breathing: useBreathingRitualOnWrongTab(),
   };
+  await noteSwitchAttempt();
+  if (epoch !== sessionEpoch) return null;
   if (!plan.breathing) focusLockedTab(plan.lockedTabId, plan.lockedWindowId, epoch);
   return plan;
 }
@@ -582,6 +1009,7 @@ function continueRedirect(plan) {
     showWrongTabFeedback(plan.tabId, plan.epoch);
     return;
   }
+  maybeRedirectBlockedTab(plan.tabId, plan.epoch);
   queueDeferredWork(() => syncBlockStateForTab(plan.tabId));
 }
 
@@ -602,7 +1030,7 @@ async function showWrongTabFeedback(tabId, epoch) {
     });
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content/overlay.js"],
+      files: ["shared/rituals.js", "content/overlay.js"],
     });
   } catch (e) {
     // chrome:// or extension pages cannot show the overlay, so fall back to an immediate bounce.
@@ -666,6 +1094,7 @@ async function injectReminderForLockedTabs() {
 
 async function disableLock() {
   invalidateEnforcement();
+  await noteSessionPause();
   const tabIdsToClean = getLockedTabIdsArray();
   state.mode = "off";
   state.lockedTabId = null;
@@ -677,6 +1106,9 @@ async function disableLock() {
   state.pomodoroEndTime = null;
   state.pomodoroBreakDuration = null;
   state.pomodoroPhase = 0;
+  state.pomodoroCycle = null;
+  state.pomodoroSound = null;
+  state.allowedHosts = null;
   await saveState();
   await clearLiveSession();
   updateIcon();
@@ -700,9 +1132,15 @@ async function enableLock(tab, taskText) {
   state.pomodoroEndTime = null;
   state.pomodoroBreakDuration = null;
   state.pomodoroPhase = 0;
+  state.pomodoroCycle = null;
+  state.pomodoroSound = null;
+  state.allowedHosts = null;
   await saveState();
   await markLiveSession();
   await clearPomodoroAlarms();
+  await armStrictIfNeeded();
+  await noteSessionFocus(true);
+  await persistProDisplayIfNeeded();
   updateIcon();
   queueDeferredWork(async () => {
     await injectReminderForLockedTabs();
@@ -816,6 +1254,13 @@ async function enforceActiveTab(tabId, scheduledEpoch) {
   await healTabs();
   await ensurePomodoroArmed();
   if (scheduledEpoch !== sessionEpoch) return null;
+  if (isPro() && state.allowedHosts?.length) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (await maybeAdmitAllowedHost(tabId, tabUrl(tab))) await saveState();
+    } catch (_) {}
+  }
+  if (scheduledEpoch !== sessionEpoch) return null;
   return beginRedirect(tabId, scheduledEpoch);
 }
 
@@ -833,6 +1278,10 @@ async function enforceWindow(windowId, scheduledEpoch) {
 }
 
 async function handleAlarm(alarm) {
+  if (alarm?.name === ALARM_SCHEDULE) {
+    await runSchedule();
+    return;
+  }
   if (alarm?.name === ALARM_RECONCILE) {
     await reconcileTabsAfterRestart();
     await ensurePomodoroArmed();
@@ -854,9 +1303,14 @@ async function handleAlarm(alarm) {
   if (!isTimestamp(state.pomodoroEndTime) || state.pomodoroEndTime > now) {
     state.pomodoroEndTime = now;
   }
+  const phaseBefore = state.pomodoroState;
   completeDuePhases(now);
+  const phaseChanged = phaseBefore !== state.pomodoroState;
   await saveState();
   await armPomodoroAlarm();
+  if (phaseChanged && state.pomodoroState === "break") await noteSessionPause();
+  if (phaseChanged && state.pomodoroState === "focus") await noteSessionFocus(false);
+  if (phaseChanged && state.pomodoroSound) await playPhaseSound(state.pomodoroSound);
   updateIcon();
   const resumedFocus = state.pomodoroState === "focus";
   queueDeferredWork(async () => {
@@ -865,10 +1319,19 @@ async function handleAlarm(alarm) {
   });
 }
 
+async function maintainPro() {
+  await hydrateProSettingsFromSync();
+  await refreshLicenseIfStale();
+  await runSchedule();
+  await persistProDisplayIfNeeded();
+  applyUninstallUrl();
+}
+
 function wakeSession() {
   runStateTask(async () => {
     await ensurePomodoroArmed();
     await healTabs();
+    await maintainPro();
     updateIcon();
   })
     .then(() => {
@@ -901,7 +1364,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.url) {
     runStateTask(async () => {
-      if (rememberTabUrl(tabId, changeInfo.url)) await saveState();
+      let changed = rememberTabUrl(tabId, changeInfo.url);
+      if (await maybeAdmitAllowedHost(tabId, changeInfo.url)) changed = true;
+      if (changed) await saveState();
     });
   }
   if (changeInfo.status !== "loading" && changeInfo.status !== "complete") return;
@@ -935,11 +1400,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await ensurePomodoroArmed();
         await healTabs();
         updateIcon();
-        return { state, pomodoroCycle: POMODORO_CYCLE };
+        return { state, pomodoroCycle: cycleForDisplay(), pro: proSnapshot() };
 
-      case "unlockLock":
+      case "getProState":
+        await hydrateProSettingsFromSync();
+        return { pro: proSnapshot() };
+
+      case "unlockLock": {
+        const denial = await endSessionDenial(message);
+        if (denial) return denial;
         await disableLock();
         return { locked: false };
+      }
 
       case "getTabBlockState": {
         await healTabs();
@@ -981,7 +1453,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             };
           }
         } else if (active || message.intent === "unlock") {
-          if (active) await disableLock();
+          if (active) {
+            const denial = await endSessionDenial(message);
+            if (denial) return denial;
+            await disableLock();
+          }
           return { locked: false };
         }
 
@@ -1005,7 +1481,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         const incomingTask = String(message.taskText || "").trim();
-        if (state.mode !== "locked") {
+        const startingFresh = state.mode !== "locked";
+        if (startingFresh) {
           const tab = await resolveTargetTab(message);
           if (!tab?.id) return { error: "No active tab" };
           state.lockedTabId = tab.id;
@@ -1013,6 +1490,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           state.lockedWindowId = tab.windowId ?? null;
           state.lockedTabRecords = [recordFromTab(tab, true)];
           state.taskText = incomingTask;
+          state.allowedHosts = null;
         } else if (incomingTask) {
           state.taskText = incomingTask;
         }
@@ -1020,11 +1498,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         state.mode = "pomodoro";
         state.pomodoroPhase = 0;
         state.pomodoroState = "focus";
-        state.pomodoroBreakDuration = POMODORO_CYCLE[0].break;
-        state.pomodoroEndTime = Date.now() + POMODORO_CYCLE[0].focus * 60 * 1000;
+        const custom = customPomodoroSelection();
+        state.pomodoroCycle = custom.cycle;
+        state.pomodoroSound = custom.sound;
+        const firstPhase = phaseAt(0);
+        state.pomodoroBreakDuration = firstPhase.break;
+        state.pomodoroEndTime = Date.now() + firstPhase.focus * 60 * 1000;
         await saveState();
         await markLiveSession();
         await armPomodoroAlarm();
+        await armStrictIfNeeded();
+        await noteSessionFocus(startingFresh);
+        await persistProDisplayIfNeeded();
         updateIcon();
         queueDeferredWork(async () => {
           await injectReminderForLockedTabs();
@@ -1041,6 +1526,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       case "lifeline": {
+        const denial = await endSessionDenial(message);
+        if (denial) return denial;
         await disableLock();
         return { success: true };
       }
@@ -1155,6 +1642,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await chrome.windows.update(lockedWindowId, { focused: true });
           }
           if (fromTabId) {
+            await maybeRedirectBlockedTab(fromTabId, scheduledEpoch);
             await removeBreathingOverlayFromTab(fromTabId);
             await syncBlockStateForTab(fromTabId);
           }
@@ -1162,6 +1650,159 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return { success: false };
         }
         return { success: true };
+      }
+
+      case "setProSettings": {
+        const denial = await proMutationDenial(message);
+        if (denial) return denial;
+        const problem = TabLockProSettings.explainSettings(message.patch);
+        if (problem) return { error: problem };
+        proSettings = TabLockProSettings.mergeSettings(proSettings, message.patch);
+        const saved = await saveProSettings();
+        return { success: true, ...saved, pro: proSnapshot() };
+      }
+
+      case "setProtection": {
+        if (!isPro()) return { error: "Pro feature", code: "pro" };
+        const current = proSettings.protection;
+        if (current?.hash) {
+          const ok = await TabLockProSettings.verifyPassword(message.currentPassword || "", current);
+          if (!ok) return { error: "That password does not match.", code: "protection" };
+        }
+        if (message.enabled === false) {
+          proSettings = { ...proSettings, protection: { enabled: false, salt: "", hash: "", iterations: 0 } };
+        } else if (message.password) {
+          const password = String(message.password);
+          if (password.length < 4 || password.length > 128) {
+            return { error: "Use a password between 4 and 128 characters." };
+          }
+          proSettings = { ...proSettings, protection: await TabLockProSettings.createProtection(password) };
+        } else if (message.enabled && current?.hash) {
+          proSettings = { ...proSettings, protection: { ...current, enabled: true } };
+        } else {
+          return { error: "Choose a password to turn protection on." };
+        }
+        const saved = await saveProSettings();
+        return { success: true, ...saved, pro: proSnapshot() };
+      }
+
+      case "saveFocusSet": {
+        const denial = await proMutationDenial(message);
+        if (denial) return denial;
+        const name = String(message.name || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 40);
+        if (!name) return { error: "Name the focus set." };
+        const hosts = [];
+        for (const host of state.allowedHosts || []) {
+          const clean = TabLockProSettings.cleanHost(host);
+          if (clean && !hosts.includes(clean)) hosts.push(clean);
+        }
+        for (const id of getLockedTabIdsArray()) {
+          try {
+            const tab = await chrome.tabs.get(id);
+            const host = TabLockProSettings.hostFromUrl(tabUrl(tab));
+            if (host && !hosts.includes(host)) hosts.push(host);
+          } catch (_) {}
+        }
+        if (!hosts.length) return { error: "Lock a normal web page before saving a focus set." };
+        const focusSet = { id: crypto.randomUUID(), name, hosts, createdAt: Date.now() };
+        proSettings = {
+          ...proSettings,
+          focusSets: [...proSettings.focusSets, focusSet].slice(-30),
+        };
+        const saved = await saveProSettings();
+        return { success: true, set: focusSet, ...saved, pro: proSnapshot() };
+      }
+
+      case "deleteFocusSet": {
+        const denial = await proMutationDenial(message);
+        if (denial) return denial;
+        proSettings = {
+          ...proSettings,
+          focusSets: proSettings.focusSets.filter((set) => set.id !== message.id),
+        };
+        const saved = await saveProSettings();
+        return { success: true, ...saved, pro: proSnapshot() };
+      }
+
+      case "restoreFocusSet": {
+        const denial = await proMutationDenial(message);
+        if (denial) return denial;
+        const focusSet = proSettings.focusSets.find((set) => set.id === message.id);
+        if (!focusSet) return { error: "Focus set not found." };
+        if (!isSessionActive()) {
+          const tab = await resolveTargetTab(message);
+          if (!tab?.id) return { error: "No active tab" };
+          await enableLock(tab, message.taskText || focusSet.name);
+        }
+        state.allowedHosts = focusSet.hosts.slice();
+        const records = recordsFromState();
+        const tabs = await chrome.tabs.query({});
+        for (const tab of tabs) {
+          const host = TabLockProSettings.hostFromUrl(tabUrl(tab));
+          if (!host || !focusSet.hosts.includes(host) || records.some((record) => record.id === tab.id)) continue;
+          records.push(recordFromTab(tab, false));
+        }
+        if (!records.length) return { error: "No open tab matches that focus set." };
+        applyLockedRecords(records);
+        await saveState();
+        await markLiveSession();
+        queueDeferredWork(async () => {
+          await syncBlockStateForAllTabs();
+          await injectReminderForLockedTabs();
+        });
+        return { success: true, hosts: state.allowedHosts, pro: proSnapshot() };
+      }
+
+      case "startCheckout": {
+        const base = effectiveApiBase();
+        if (!base) return { error: "Add your license server URL in Pro settings.", code: "setup" };
+        const install = await ensureInstallId();
+        try {
+          const response = await fetch(new URL("/api/checkout", base), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ plan: message.plan, installId: install }),
+          });
+          const body = await response.json();
+          if (!response.ok || !body.url) return { error: body.error || "Checkout failed." };
+          await chrome.tabs.create({ url: body.url });
+          return { success: true, url: body.url };
+        } catch (error) {
+          return { error: error.message || "Checkout failed." };
+        }
+      }
+
+      case "activateLicense": {
+        const base = effectiveApiBase();
+        if (!base) return { error: "Add your license server URL in Pro settings.", code: "setup" };
+        const token = String(message.token || "").trim();
+        if (!token) return { error: "Paste the license key from the checkout page." };
+        licenseRecord = { ...(licenseRecord || {}), token };
+        const snapshot = await refreshLicense(true);
+        if (!snapshot.entitled) {
+          return { error: snapshot.error || "That license is not active.", pro: snapshot };
+        }
+        return { success: true, pro: snapshot };
+      }
+
+      case "refreshLicense":
+        return { pro: await refreshLicense(true) };
+
+      case "setApiBase": {
+        const normalized = TabLockProSettings.normalizeApiBase(message.value);
+        if (message.value && !normalized) {
+          return { error: "Use an https license server, or http://127.0.0.1 for local testing." };
+        }
+        apiBaseOverride = normalized;
+        await chrome.storage.local.set({ [API_BASE_KEY]: normalized });
+        applyUninstallUrl();
+        return { success: true, pro: proSnapshot() };
+      }
+
+      case "exportStats": {
+        if (!isPro()) return { error: "Pro feature", code: "pro" };
+        const presented = TabLockStats.present(statsRecord, Date.now());
+        return { json: JSON.stringify(presented, null, 2), csv: TabLockStats.toCsv(presented) };
       }
 
       default:
@@ -1202,12 +1843,26 @@ chrome.runtime.onStartup.addListener(() => {
   wakeSession();
 });
 
+if (chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "sync" || !changes[PRO_SETTINGS_KEY]) return;
+    runStateTask(async () => {
+      if (proSettings?.syncEnabled === false) return;
+      proSettings = TabLockProSettings.sanitize(changes[PRO_SETTINGS_KEY].newValue || {});
+      await chrome.storage.local.set({ [PRO_SETTINGS_KEY]: proSettings });
+      await persistProDisplayIfNeeded();
+      await runSchedule();
+    });
+  });
+}
+
 chrome.runtime.onInstalled.addListener((details) => {
   const extensionUpdate = details?.reason === "update";
   runStateTask(async () => {
     if (extensionUpdate) await adoptExistingTabIds();
     await ensurePomodoroArmed();
     await healTabs();
+    await maintainPro();
     updateIcon();
   })
     .then(() => {

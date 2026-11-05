@@ -5,9 +5,21 @@
 (async function () {
   if (document.getElementById("unswitch-overlay")) return;
 
-  const BREATH_DURATION_MS = 10000;
+  const CLASSIC_RITUAL = {
+    duration: 10000,
+    sub: "Stay with the animation for 10 seconds.",
+    phases: [
+      { until: 0.5, label: "Breathe in", mode: "in" },
+      { until: 1, label: "Breathe out", mode: "out" },
+    ],
+  };
   const result = await chrome.storage.local.get("unswitch-state");
   const state = result["unswitch-state"] || {};
+  const style = state.proDisplay?.breathingStyle;
+  const ritual =
+    (style === "box" || style === "478") && typeof TabLockRituals !== "undefined"
+      ? TabLockRituals.resolve(style)
+      : CLASSIC_RITUAL;
   if (!(state.mode === "locked" ||
     (state.mode === "pomodoro" && state.pomodoroState === "focus"))) return;
   const taskText = (state.taskText || "").trim();
@@ -31,7 +43,7 @@
       <span class="unswitch-overlay-text unswitch-overlay-phase">Breathe in</span>
       <span class="unswitch-overlay-countdown">10s</span>
       ${taskText ? `<span class="unswitch-overlay-task">${escapeHtml(taskText)}</span>` : ""}
-      <span class="unswitch-overlay-subtext">Stay with the animation for 10 seconds.</span>
+      <span class="unswitch-overlay-subtext">${escapeHtml(ritual.sub)}</span>
     </div>
   `;
 
@@ -59,15 +71,23 @@
 
   function updateBreathUi() {
     const elapsed = Date.now() - startTime;
-    const remainingMs = Math.max(0, BREATH_DURATION_MS - elapsed);
+    const remainingMs = Math.max(0, ritual.duration - elapsed);
     const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
-    const isExhale = elapsed >= BREATH_DURATION_MS / 2;
+    const progress = ritual.duration === 0 ? 1 : elapsed / ritual.duration;
+    let phase = ritual.phases[ritual.phases.length - 1];
+    for (const item of ritual.phases) {
+      if (progress < item.until) {
+        phase = item;
+        break;
+      }
+    }
 
-    overlay.classList.toggle("unswitch-overlay-breathe-in", !isExhale);
-    overlay.classList.toggle("unswitch-overlay-breathe-out", isExhale);
+    overlay.classList.toggle("unswitch-overlay-breathe-in", phase.mode === "in");
+    overlay.classList.toggle("unswitch-overlay-breathe-out", phase.mode === "out");
+    overlay.classList.toggle("unswitch-overlay-breathe-hold", phase.mode === "hold");
 
     if (phaseEl) {
-      phaseEl.textContent = isExhale ? "Breathe out" : "Breathe in";
+      phaseEl.textContent = phase.label;
     }
 
     if (countdownEl) {
@@ -101,7 +121,7 @@
 
   const intervalId = window.setInterval(() => {
     updateBreathUi();
-    if (Date.now() - startTime >= BREATH_DURATION_MS) {
+    if (Date.now() - startTime >= ritual.duration) {
       window.clearInterval(intervalId);
     }
   }, 200);
@@ -113,6 +133,6 @@
         void chrome.runtime.lastError;
         teardownOverlay();
       });
-    }, BREATH_DURATION_MS)
+    }, ritual.duration)
   );
 })();

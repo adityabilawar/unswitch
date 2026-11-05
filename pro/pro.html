@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tab Lock Pro</title>
+  <link rel="stylesheet" href="pro.css">
+</head>
+<body>
+  <main class="pro-app">
+    <header>
+      <p class="eyebrow">Tab Lock</p>
+      <h1>Pro</h1>
+      <p class="status" id="status">Checking license…</p>
+    </header>
+
+    <section id="upgradeSection">
+      <h2>Upgrade</h2>
+      <p class="status">Current tab lock, allowed tabs, the 60-minute Pomodoro, breathing pause, and reminders stay free.</p>
+      <div class="plans" id="planList"></div>
+      <label>License server
+        <input id="apiBase" type="url" placeholder="https://your-project.vercel.app" />
+      </label>
+      <button class="secondary" id="saveApiBase" type="button">Save server</button>
+      <label>License key
+        <input id="licenseKey" type="text" placeholder="Paste the key from the checkout page" autocomplete="off" spellcheck="false" />
+      </label>
+      <div class="row">
+        <button id="activateKey" type="button">Activate key</button>
+        <button class="secondary" id="refreshLicense" type="button">Refresh license</button>
+      </div>
+      <p class="message" id="licenseMessage"></p>
+    </section>
+
+    <form id="settingsForm">
+      <fieldset id="settingsFields">
+        <section>
+          <h2>Custom Pomodoro</h2>
+          <label class="check"><input id="useCustom" type="checkbox" /> Use custom focus and break lengths</label>
+          <div id="phases"></div>
+          <button class="secondary" id="addPhase" type="button">Add phase</button>
+          <label>Phase-change sound
+            <select id="sound">
+              <option value="none">None</option>
+              <option value="chime">Chime</option>
+              <option value="bell">Bell</option>
+              <option value="ding">Ding</option>
+            </select>
+          </label>
+        </section>
+
+        <section>
+          <h2>Strict mode</h2>
+          <p class="status">Disables Lifeline and unlock until the timer ends, or until the challenge phrase is typed. Chrome can still end a session if the focus tab is closed.</p>
+          <label>Mode
+            <select id="strictMode">
+              <option value="off">Off</option>
+              <option value="timed">Disable Lifeline for a set time</option>
+              <option value="phrase">Require a challenge phrase</option>
+            </select>
+          </label>
+          <label>Minutes
+            <input id="strictMinutes" type="number" min="1" max="240" value="50" />
+          </label>
+          <label>Challenge phrase
+            <input id="strictPhrase" type="text" maxlength="80" />
+          </label>
+        </section>
+
+        <section>
+          <h2>Scheduled auto-lock</h2>
+          <label class="check"><input id="scheduleEnabled" type="checkbox" /> Lock on these days</label>
+          <div class="days" id="days"></div>
+          <div class="row">
+            <label>Start <input id="scheduleStart" type="time" value="09:00" /></label>
+            <label>End <input id="scheduleEnd" type="time" /></label>
+          </div>
+          <label class="check"><input id="unlockAtEnd" type="checkbox" /> Unlock at the end time</label>
+          <p class="status">Checked about once a minute, and only if that minute falls within five minutes after the start. An open session is left alone.</p>
+        </section>
+
+        <section>
+          <h2>Blocked screen</h2>
+          <label>Quote
+            <textarea id="quote" maxlength="240"></textarea>
+          </label>
+          <label>Image URL (https)
+            <input id="imageUrl" type="url" placeholder="https://example.com/image.jpg" />
+          </label>
+          <label>Redirect URL (https)
+            <input id="redirectUrl" type="url" placeholder="https://example.com/focus" />
+          </label>
+          <label>Breathing ritual when that option is selected
+            <select id="breathingStyle">
+              <option value="classic">Classic, 10 seconds</option>
+              <option value="box">Box breath, 16 seconds</option>
+              <option value="478">4-7-8 breath, 19 seconds</option>
+            </select>
+          </label>
+        </section>
+
+        <section>
+          <h2>Sync</h2>
+          <label class="check"><input id="syncEnabled" type="checkbox" checked /> Sync these settings with chrome.storage.sync</label>
+          <p class="status">The password is stored only as a verifier. Stats and the license cache stay on this device.</p>
+          <label>Password for this save, if protection is already on
+            <input id="settingsPassword" type="password" autocomplete="current-password" />
+          </label>
+          <label>Challenge phrase, if a strict session is running
+            <input id="settingsChallenge" type="text" autocomplete="off" />
+          </label>
+          <button id="saveSettings" type="submit">Save Pro settings</button>
+          <p class="message" id="settingsMessage"></p>
+        </section>
+      </fieldset>
+    </form>
+
+    <section>
+      <h2>Focus sets</h2>
+      <p class="status">Save the sites in the current allowed tabs, then restore them in one click.</p>
+      <div class="row">
+        <input id="setName" type="text" maxlength="40" placeholder="Set name" />
+        <button id="saveSet" type="button">Save current tabs</button>
+      </div>
+      <div id="focusSets"></div>
+    </section>
+
+    <section>
+      <h2>Stats</h2>
+      <div class="stats" id="stats"></div>
+      <div class="row">
+        <button class="secondary" id="exportJson" type="button">Copy JSON</button>
+        <button class="secondary" id="exportCsv" type="button">Download CSV</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Protection</h2>
+      <p class="status">Requires this password before unlock, Lifeline, or Pro setting changes. Chrome does not let extensions block uninstall. When a license server is set, removing Tab Lock opens a local explanation page and does not record the visit.</p>
+      <label>Current password
+        <input id="currentPassword" type="password" autocomplete="current-password" />
+      </label>
+      <label>New password
+        <input id="newPassword" type="password" autocomplete="new-password" />
+      </label>
+      <div class="row">
+        <button id="enableProtection" type="button">Turn on protection</button>
+        <button class="secondary" id="disableProtection" type="button">Turn off protection</button>
+      </div>
+      <p class="message" id="protectionMessage"></p>
+    </section>
+  </main>
+  <script src="pro.js"></script>
+</body>
+</html>

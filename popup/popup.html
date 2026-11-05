@@ -36,6 +36,11 @@
         <span class="lock-icon" id="lockIcon"></span>
         <span class="lock-label" id="lockLabel">Lock Tab</span>
       </button>
+      <div class="gate-row hidden" id="sessionGate">
+        <input type="password" class="task-input" id="gatePassword" placeholder="Protection password" autocomplete="current-password" />
+        <input type="text" class="task-input" id="gatePhrase" placeholder="Challenge phrase" autocomplete="off" />
+        <p class="gate-note" id="gateNote"></p>
+      </div>
       <div class="tab-manager hidden" id="tabManager">
         <button class="tab-manager-toggle" id="tabManagerToggle" type="button">
           <span class="tab-manager-toggle-label">Manage Locked Tabs</span>
@@ -56,7 +61,7 @@
     <section class="pomodoro-section">
       <h2 class="section-title">Pomodoro Focus</h2>
       <div class="pomodoro-inactive" id="pomodoroInactive">
-        <p class="pomodoro-desc">60 min focus → 5/10/20 min breaks</p>
+        <p class="pomodoro-desc" id="pomodoroDesc">60 min focus → 5/10/20 min breaks</p>
         <button class="btn-primary" id="startPomodoro" type="button">Start Pomodoro</button>
       </div>
       <div class="pomodoro-active hidden" id="pomodoroActive">
@@ -69,6 +74,24 @@
           <span class="lifeline-label">Lifeline</span>
           <span class="lifeline-hint" id="lifelineHint">Hold 5 sec to cancel</span>
         </button>
+      </div>
+    </section>
+
+    <section class="pro-section" id="proSection">
+      <div class="divider"></div>
+      <div class="pro-card">
+        <div class="pro-card-top">
+          <h2 class="section-title">Pro</h2>
+          <span class="pro-badge" id="proBadge">Free</span>
+        </div>
+        <p class="pro-lead" id="proLead">Custom timers, strict mode, schedules, focus sets, stats, and your own blocked screen. Everything you use today stays free.</p>
+        <div class="pro-plans" id="proPlans"></div>
+        <div class="pro-activate">
+          <input type="text" class="task-input" id="licenseKey" placeholder="Paste license key" autocomplete="off" spellcheck="false" />
+          <button class="btn-secondary" id="activateLicense" type="button">Activate</button>
+        </div>
+        <p class="pro-message" id="proMessage"></p>
+        <button class="btn-secondary" id="openPro" type="button">Pro settings and license</button>
       </div>
     </section>
   </div>

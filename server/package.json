@@ -1,0 +1,10 @@
+{
+  "name": "tab-lock-license-server",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node dev-server.js"
+  }
+}

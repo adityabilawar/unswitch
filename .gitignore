@@ -1,2 +1,5 @@
 dist/
 .DS_Store
+.env
+server/.env
+.vercel
